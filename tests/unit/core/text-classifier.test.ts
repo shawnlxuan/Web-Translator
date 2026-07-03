@@ -5,7 +5,15 @@ class FakeElement {
   tagName: string;
   parentElement: FakeElement | null = null;
   textContent = '';
+  className = '';
   display = 'inline';
+  visibility = 'visible';
+  position = 'static';
+  width = 'auto';
+  height = 'auto';
+  overflow = 'visible';
+  clip = 'auto';
+  clipPath = 'none';
   private attributes = new Map<string, string>();
 
   constructor(tagName: string) {
@@ -18,6 +26,10 @@ class FakeElement {
 
   getAttribute(name: string): string | null {
     return this.attributes.get(name) ?? null;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
   }
 }
 
@@ -32,7 +44,13 @@ describe('shouldSkipNode', () => {
       value: {
         getComputedStyle: (element: FakeElement) => ({
           display: element.display,
-          visibility: 'visible',
+          visibility: element.visibility,
+          position: element.position,
+          width: element.width,
+          height: element.height,
+          overflow: element.overflow,
+          clip: element.clip,
+          clipPath: element.clipPath,
         }),
       },
     });
@@ -63,6 +81,26 @@ describe('shouldSkipNode', () => {
     const code = new FakeElement('code');
     code.parentElement = pre;
     const textNode = { parentElement: code } as unknown as Node;
+
+    expect(shouldSkipNode(textNode)).toBe(true);
+  });
+
+  it('skips screen-reader-only text so accessibility labels are not rendered as visible translations', () => {
+    const heading = new FakeElement('h2');
+    heading.className = 'sr-only';
+    const textNode = { parentElement: heading } as unknown as Node;
+
+    expect(shouldSkipNode(textNode)).toBe(true);
+  });
+
+  it('skips clipped one-pixel visually hidden text', () => {
+    const heading = new FakeElement('h2');
+    heading.position = 'absolute';
+    heading.width = '1px';
+    heading.height = '1px';
+    heading.overflow = 'hidden';
+    heading.clip = 'rect(0px, 0px, 0px, 0px)';
+    const textNode = { parentElement: heading } as unknown as Node;
 
     expect(shouldSkipNode(textNode)).toBe(true);
   });

@@ -7,7 +7,7 @@ import type { ExtractedTextNode, Segment, SentenceWithContext, SegmentContext } 
 import { extractTextNodes } from '../../entrypoints/content/dom/text-extractor';
 import { buildSegments } from '../../entrypoints/content/dom/segment-builder';
 import { createBatches } from './batch-manager';
-import { detectLanguage } from '../segmentation/language-detector';
+import { detectLanguage, shouldSkipTranslationForTarget } from '../segmentation/language-detector';
 
 export interface TranslationPipelineResult {
   extractedNodes: ExtractedTextNode[];
@@ -36,7 +36,10 @@ export function runExtractionPipeline(
       );
 
   // Step 3: Build segments
-  const segments = buildSegments(extractedNodes, detectedLang);
+  const segments = filterSegmentsForTargetLanguage(
+    buildSegments(extractedNodes, detectedLang),
+    targetLang,
+  );
 
   // Step 4: Create batches with context
   const batches = createBatches(segments, extractedNodes, {
@@ -51,6 +54,15 @@ export function runExtractionPipeline(
     batches,
     sourceLang: detectedLang,
   };
+}
+
+export function filterSegmentsForTargetLanguage(
+  segments: Segment[],
+  targetLang: string,
+): Segment[] {
+  return segments.filter((segment) =>
+    !shouldSkipTranslationForTarget(segment.originalText, targetLang),
+  );
 }
 
 /**

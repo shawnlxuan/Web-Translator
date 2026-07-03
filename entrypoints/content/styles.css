@@ -51,6 +51,20 @@
   white-space: normal;
 }
 
+.tr-compact-translation {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  line-height: inherit;
+  margin-left: 0.36em;
+  padding: 0;
+  border: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .tr-table-translation {
   display: block;
   color: inherit;

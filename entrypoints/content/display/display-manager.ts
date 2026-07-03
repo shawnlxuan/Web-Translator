@@ -20,6 +20,8 @@ export interface TranslationEntry {
   translationElement: Element | null;
 }
 
+type BilingualPlacement = 'inline-right' | 'table' | 'compact' | 'block';
+
 /**
  * Display Manager handles all translation injection and mode switching.
  */
@@ -53,18 +55,22 @@ export class DisplayManager {
     translation: string,
     segmentId: string,
   ): void {
-    if (textNodes.length === 0 || !translation.trim()) return;
+    const trimmedTranslation = translation.trim();
+    if (textNodes.length === 0 || !trimmedTranslation) return;
     if (this.entries.some((entry) => entry.segmentId === segmentId)) return;
     if (blockElement.hasAttribute(DATA_TRANSLATED_ATTR)) return;
     this.removeLoadingIndicator(segmentId);
 
     const originalTexts = textNodes.map((node) => node.textContent || '');
+    const originalText = originalTexts.join(' ');
+    if (isEffectivelyUnchangedTranslation(originalText, trimmedTranslation)) return;
+
     const entry: TranslationEntry = {
       blockElement,
       textNodes,
       originalTexts,
-      originalText: originalTexts.join(' '),
-      translation: translation.trim(),
+      originalText,
+      translation: trimmedTranslation,
       segmentId,
       translationElement: null,
     };
@@ -73,7 +79,11 @@ export class DisplayManager {
     this.renderEntry(entry);
   }
 
-  showLoadingIndicator(blockElement: Element, segmentId: string): void {
+  showLoadingIndicator(
+    blockElement: Element,
+    segmentId: string,
+    textNodes: Text[] = [],
+  ): void {
     if (this.loadingElements.has(segmentId)) return;
     if (blockElement.hasAttribute(DATA_TRANSLATED_ATTR)) return;
 
@@ -99,7 +109,16 @@ export class DisplayManager {
     indicator.appendChild(bridge);
     indicator.appendChild(targetChar);
 
-    blockElement.appendChild(indicator);
+    const mountElement = shouldUseCompactPlacement({
+      blockElement,
+      textNodes,
+      originalText: textNodes.map((node) => node.textContent || '').join(' '),
+      translation: '',
+    })
+      ? findCompactMountElement(blockElement, textNodes)
+      : blockElement;
+
+    mountElement.appendChild(indicator);
     this.loadingElements.set(segmentId, indicator);
   }
 
@@ -152,29 +171,26 @@ export class DisplayManager {
   }
 
   private renderBilingual(entry: TranslationEntry): void {
-    const inlineRight = shouldPlaceTranslationInlineRight(entry);
-    const tableCell = isTableCell(entry.blockElement);
-    const translationElement = document.createElement(inlineRight ? 'span' : 'div');
-    if (inlineRight) {
-      translationElement.className =
-        `${CSS_PREFIX}inline-right-translation ${CSS_PREFIX}segment-translation`;
-    } else if (tableCell) {
-      translationElement.className =
-        `${CSS_PREFIX}table-translation ${CSS_PREFIX}segment-translation`;
-    } else {
-      translationElement.className =
-        `${CSS_PREFIX}block-translation ${CSS_PREFIX}segment-translation`;
-    }
+    const placement = getBilingualPlacement(entry);
+    const translationElement = document.createElement(
+      placement === 'inline-right' || placement === 'compact' ? 'span' : 'div',
+    );
+    translationElement.className =
+      `${getTranslationClassName(placement)} ${CSS_PREFIX}segment-translation`;
     translationElement.textContent = entry.translation;
     translationElement.setAttribute(DATA_TRANSLATED_ATTR, 'true');
     translationElement.setAttribute(DATA_SEGMENT_ATTR, entry.segmentId);
     translationElement.setAttribute('data-tr-injected', 'true');
+    translationElement.setAttribute('data-tr-placement', placement);
 
-    if (!inlineRight) {
-      translationElement.setAttribute('style', getTranslationStyle(entry.blockElement));
-    }
+    const mountElement = placement === 'compact'
+      ? findCompactMountElement(entry.blockElement, entry.textNodes)
+      : entry.blockElement;
+    translationElement.setAttribute('style', getTranslationStyle(mountElement));
 
-    if (inlineRight || tableCell) {
+    if (placement === 'compact') {
+      mountElement.appendChild(translationElement);
+    } else if (placement === 'inline-right' || placement === 'table') {
       entry.blockElement.appendChild(translationElement);
     } else if (entry.blockElement.parentElement) {
       entry.blockElement.parentElement.insertBefore(
@@ -247,6 +263,27 @@ function isTableCell(element: Element): boolean {
   return ['TD', 'TH'].includes(element.tagName.toUpperCase());
 }
 
+function getBilingualPlacement(entry: TranslationEntry): BilingualPlacement {
+  if (isTableCell(entry.blockElement)) return 'table';
+  if (shouldPlaceTranslationInlineRight(entry)) return 'inline-right';
+  if (shouldUseCompactPlacement(entry)) return 'compact';
+  return 'block';
+}
+
+function getTranslationClassName(placement: BilingualPlacement): string {
+  switch (placement) {
+    case 'inline-right':
+      return `${CSS_PREFIX}inline-right-translation`;
+    case 'table':
+      return `${CSS_PREFIX}table-translation`;
+    case 'compact':
+      return `${CSS_PREFIX}compact-translation`;
+    case 'block':
+    default:
+      return `${CSS_PREFIX}block-translation`;
+  }
+}
+
 function shouldPlaceTranslationInlineRight(entry: TranslationEntry): boolean {
   if (window.innerWidth < 768) return false;
 
@@ -289,6 +326,87 @@ function shouldPlaceTranslationInlineRight(entry: TranslationEntry): boolean {
   return rightSpace >= estimatedTranslationWidth + 16;
 }
 
+function shouldUseCompactPlacement(entry: Pick<
+  TranslationEntry,
+  'blockElement' | 'textNodes' | 'originalText' | 'translation'
+>): boolean {
+  const element = entry.blockElement;
+  const tag = element.tagName.toUpperCase();
+
+  if (isTableCell(element)) return false;
+  if (['P', 'ARTICLE', 'SECTION', 'BLOCKQUOTE'].includes(tag)) return false;
+
+  if (['A', 'BUTTON', 'SPAN', 'LABEL', 'LI', 'DT', 'DD', 'SUMMARY'].includes(tag)) {
+    return true;
+  }
+
+  const computedStyle = getComputedStyle(element);
+  const originalLength = entry.originalText.trim().length;
+  const translationLength = entry.translation.trim().length;
+  if (originalLength > 180 || translationLength > 220) return false;
+
+  const rect = element.getBoundingClientRect();
+  const hasUsableRect = rect.width > 0 && rect.height > 0;
+  if (!hasUsableRect) return hasLayoutSensitiveContext(element);
+
+  const fontSize = parseFloat(computedStyle.fontSize) || 14;
+  const lineHeight = parseLineHeight(computedStyle.lineHeight, fontSize);
+  const isCompactLine = rect.height <= lineHeight * 2.6;
+  const isShortBlock = tag === 'DIV' && originalLength <= 80 && translationLength <= 100;
+
+  return isCompactLine && (hasLayoutSensitiveContext(element) || isShortBlock);
+}
+
+function findCompactMountElement(blockElement: Element, textNodes: Text[]): Element {
+  for (let i = textNodes.length - 1; i >= 0; i--) {
+    const mount = findSafeTextParent(textNodes[i], blockElement);
+    if (mount) return mount;
+  }
+
+  return blockElement;
+}
+
+function findSafeTextParent(textNode: Text, blockElement: Element): Element | null {
+  let element = textNode.parentElement;
+  while (element && element !== blockElement) {
+    if (!isUnsafeCompactMount(element)) return element;
+    element = element.parentElement;
+  }
+
+  return blockElement;
+}
+
+function isUnsafeCompactMount(element: Element): boolean {
+  return ['CODE', 'PRE', 'SCRIPT', 'STYLE', 'SVG', 'CANVAS'].includes(
+    element.tagName.toUpperCase(),
+  );
+}
+
+function hasLayoutSensitiveContext(element: Element): boolean {
+  let current: Element | null = element;
+  let depth = 0;
+
+  while (current && depth < 4) {
+    const tag = current.tagName.toUpperCase();
+    if (
+      current !== element &&
+      ['P', 'ARTICLE', 'SECTION', 'MAIN', 'BLOCKQUOTE', 'BODY'].includes(tag)
+    ) {
+      return false;
+    }
+
+    const display = getComputedStyle(current).display;
+    if (['flex', 'inline-flex', 'grid', 'inline-grid'].includes(display)) {
+      return true;
+    }
+
+    current = current.parentElement;
+    depth++;
+  }
+
+  return false;
+}
+
 function getTranslationStyle(sourceElement: Element): string {
   const style = getComputedStyle(sourceElement);
   return [
@@ -304,4 +422,22 @@ function parseLineHeight(lineHeight: string, fontSize: number): number {
   const parsed = parseFloat(lineHeight);
   if (Number.isFinite(parsed)) return parsed;
   return fontSize * 1.4;
+}
+
+function isEffectivelyUnchangedTranslation(original: string, translation: string): boolean {
+  const normalizedOriginal = normalizeComparableText(original);
+  const normalizedTranslation = normalizeComparableText(translation);
+  return (
+    normalizedOriginal.length > 0 &&
+    normalizedOriginal === normalizedTranslation
+  );
+}
+
+function normalizeComparableText(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u00a0]+/g, '')
+    .replace(/[，,、]+/g, ',')
+    .replace(/[／]/g, '/');
 }

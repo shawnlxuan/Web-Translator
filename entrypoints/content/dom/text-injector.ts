@@ -74,7 +74,11 @@ export function showLoadingIndicators(segments: Segment[]): void {
   if (!displayManager) return;
 
   for (const segment of segments) {
-    displayManager.showLoadingIndicator(segment.blockElement, segment.id);
+    displayManager.showLoadingIndicator(
+      segment.blockElement,
+      segment.id,
+      segment.textNodes.map((node) => node.textNode),
+    );
   }
 }
 

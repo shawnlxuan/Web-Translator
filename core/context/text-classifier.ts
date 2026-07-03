@@ -138,25 +138,20 @@ export function shouldSkipNode(node: Node): boolean {
   if (!parent) return true;
 
   // Check tag name
-  const tagName = parent.tagName.toUpperCase();
   if (shouldSkipElement(parent)) return true;
+  if (isVisuallyHiddenElement(parent)) return true;
   if (parent.hasAttribute(DATA_TRANSLATED_ATTR)) return true;
 
   // Check for any skipped ancestors
   let ancestor = parent.parentElement;
   while (ancestor) {
     if (shouldSkipElement(ancestor)) return true;
+    if (isVisuallyHiddenElement(ancestor)) return true;
     if (ancestor.hasAttribute(DATA_TRANSLATED_ATTR)) return true;
     if (ancestor.getAttribute('contenteditable') === 'true') return true;
     if (ancestor.getAttribute('role') === 'textbox') return true;
     if (ancestor.getAttribute('data-tr-ignore') === 'true') return true;
     ancestor = ancestor.parentElement;
-  }
-
-  // Check visibility
-  const style = window.getComputedStyle(parent);
-  if (style.display === 'none' || style.visibility === 'hidden') {
-    return true;
   }
 
   return false;
@@ -180,6 +175,55 @@ function isCodeBlockElement(element: Element): boolean {
 
   const display = window.getComputedStyle(element).display;
   return !['inline', 'inline-block', 'contents'].includes(display);
+}
+
+function isVisuallyHiddenElement(element: Element): boolean {
+  if (element.hasAttribute('hidden')) return true;
+  if (element.getAttribute('aria-hidden') === 'true') return true;
+  if (element.getAttribute('inert') !== null) return true;
+  if (hasVisuallyHiddenClass(element)) return true;
+
+  const style = window.getComputedStyle(element);
+  if (
+    style.display === 'none' ||
+    style.visibility === 'hidden' ||
+    style.visibility === 'collapse'
+  ) {
+    return true;
+  }
+
+  const width = parseCssPixels(style.width);
+  const height = parseCssPixels(style.height);
+  const isTiny = width <= 1 && height <= 1;
+  const isClipped = (
+    (Boolean(style.clip) && style.clip !== 'auto' && style.clip !== 'none') ||
+    (Boolean(style.clipPath) && style.clipPath !== 'none')
+  );
+  const overflowHidden = style.overflow === 'hidden';
+  const isOutOfFlow = style.position === 'absolute' || style.position === 'fixed';
+
+  return isOutOfFlow && isTiny && (overflowHidden || isClipped);
+}
+
+function hasVisuallyHiddenClass(element: Element): boolean {
+  const className = typeof element.className === 'string'
+    ? element.className
+    : element.getAttribute('class') || '';
+  if (!className) return false;
+
+  return className.split(/\s+/).some((name) => (
+    name === 'sr-only' ||
+    name === 'visually-hidden' ||
+    name === 'visuallyHidden' ||
+    name === 'screen-reader-only' ||
+    name === 'screenReaderOnly'
+  ));
+}
+
+function parseCssPixels(value: string | undefined): number {
+  if (!value || value === 'auto') return Number.POSITIVE_INFINITY;
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
 /**

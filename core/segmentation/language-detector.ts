@@ -65,6 +65,35 @@ const ENGLISH_WORDS = new Set([
   'give', 'day', 'most', 'us',
 ]);
 
+const LATIN_LANGUAGE_MARKERS: Record<string, Set<string>> = {
+  en: new Set([
+    ...ENGLISH_WORDS,
+    'open', 'close', 'save', 'search', 'download', 'upload', 'file',
+    'folder', 'commit', 'branch', 'merge', 'review', 'request', 'pull',
+    'issue', 'issues', 'updated', 'yesterday', 'latest', 'settings',
+  ]),
+  fr: new Set([
+    'bonjour', 'monde', 'le', 'la', 'les', 'un', 'une', 'des', 'du',
+    'de', 'et', 'est', 'dans', 'pour', 'avec', 'vous', 'nous',
+  ]),
+  de: new Set([
+    'hallo', 'guten', 'morgen', 'welt', 'der', 'die', 'das', 'ein',
+    'eine', 'und', 'ist', 'nicht', 'mit', 'fur', 'von', 'zu',
+  ]),
+  es: new Set([
+    'hola', 'mundo', 'el', 'la', 'los', 'las', 'un', 'una', 'unos',
+    'unas', 'de', 'del', 'y', 'es', 'esta', 'este', 'para', 'con',
+  ]),
+  pt: new Set([
+    'ola', 'mundo', 'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do',
+    'da', 'e', 'esta', 'este', 'para', 'com', 'voce',
+  ]),
+  it: new Set([
+    'ciao', 'mondo', 'il', 'lo', 'la', 'gli', 'le', 'un', 'una',
+    'di', 'e', 'questo', 'questa', 'per', 'con', 'non',
+  ]),
+};
+
 /**
  * Detect the most likely source language from a text sample.
  * Returns a language code or 'en' as default.
@@ -112,12 +141,61 @@ export function detectLanguage(text: string): string {
 }
 
 /**
+ * Normalize regional language codes into coarse families for "already translated"
+ * checks. This intentionally treats Simplified and Traditional Chinese as one
+ * family because translating between them is not the extension's main job.
+ */
+export function normalizeLanguageFamily(code: string): string {
+  const normalized = code.trim().toLowerCase().replace(/_/g, '-');
+  if (!normalized || normalized === 'auto') return '';
+
+  const base = normalized.split('-')[0];
+  if (base === 'zh') return 'zh';
+  return base;
+}
+
+/**
+ * Return true when text is already in the target language family and should not
+ * be sent for translation.
+ */
+export function shouldSkipTranslationForTarget(
+  text: string,
+  targetLang: string,
+): boolean {
+  const targetFamily = normalizeLanguageFamily(targetLang);
+  if (!targetFamily) return false;
+
+  const normalizedText = text.replace(/\s+/g, ' ').trim();
+  if (normalizedText.length === 0) return true;
+  if (!hasLanguageSignal(normalizedText)) return true;
+
+  if (hasDirectFamilySignal(normalizedText, targetFamily)) {
+    return true;
+  }
+
+  if (targetFamily === 'zh' && hasJapaneseKana(normalizedText)) {
+    return false;
+  }
+
+  if (isLatinMarkerLanguage(targetFamily)) {
+    return hasLatinLanguageMarker(normalizedText, targetFamily);
+  }
+
+  const detectedFamily = normalizeLanguageFamily(detectLanguage(normalizedText));
+  if (detectedFamily === 'en' && targetFamily === 'en') {
+    return false;
+  }
+
+  return detectedFamily === targetFamily;
+}
+
+/**
  * Check if text is likely in a given language.
  * Used for quick validation.
  */
 export function isLikelyLanguage(text: string, code: string): boolean {
   const detected = detectLanguage(text);
-  return detected === code;
+  return normalizeLanguageFamily(detected) === normalizeLanguageFamily(code);
 }
 
 /**
@@ -174,4 +252,87 @@ function normalizeLang(lang: string): string | null {
     'vi': 'vi',
   };
   return mapping[code] || null;
+}
+
+function hasLanguageSignal(text: string): boolean {
+  return /[A-Za-zÀ-ỹ一-鿿㐀-䶿぀-ゟ゠-ヿ가-힯ᄀ-ᇿ฀-๿؀-ۿݐ-ݿЀ-ӿ]/.test(text);
+}
+
+function hasDirectFamilySignal(text: string, family: string): boolean {
+  if (family === 'zh') {
+    return countMatches(text, /[一-鿿㐀-䶿]/g) >= 2 && !hasJapaneseKana(text);
+  }
+
+  if (family === 'ja') {
+    return countMatches(text, /[぀-ゟ゠-ヿ]/g) >= 2;
+  }
+
+  if (family === 'ko') {
+    return countMatches(text, /[가-힯ᄀ-ᇿ]/g) >= 2;
+  }
+
+  if (family === 'th') {
+    return countMatches(text, /[฀-๿]/g) >= 2;
+  }
+
+  if (family === 'vi') {
+    return countMatches(text, /[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/gi) >= 2;
+  }
+
+  if (family === 'en') {
+    return hasLatinLanguageMarker(text, 'en');
+  }
+
+  return false;
+}
+
+function hasJapaneseKana(text: string): boolean {
+  return /[぀-ゟ゠-ヿ]/.test(text);
+}
+
+function countMatches(text: string, regex: RegExp): number {
+  return text.match(regex)?.length || 0;
+}
+
+function isLatinMarkerLanguage(family: string): boolean {
+  return Object.prototype.hasOwnProperty.call(LATIN_LANGUAGE_MARKERS, family);
+}
+
+function hasLatinLanguageMarker(text: string, family: string): boolean {
+  if (!LATIN_LANGUAGE_MARKERS[family]) return false;
+
+  const scores = scoreLatinLanguageMarkers(text);
+  const targetScore = scores[family] || 0;
+  if (targetScore < 2) return false;
+
+  const bestOtherScore = Object.entries(scores).reduce((best, [candidate, score]) => {
+    if (candidate === family) return best;
+    return Math.max(best, score);
+  }, 0);
+
+  return targetScore > bestOtherScore;
+}
+
+function tokenizeLatinWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+
+function scoreLatinLanguageMarkers(text: string): Record<string, number> {
+  const scores: Record<string, number> = {};
+  const uniqueWords = new Set(tokenizeLatinWords(text));
+
+  for (const [family, markers] of Object.entries(LATIN_LANGUAGE_MARKERS)) {
+    let score = 0;
+    for (const word of uniqueWords) {
+      if (markers.has(word)) score++;
+    }
+    scores[family] = score;
+  }
+
+  return scores;
 }
