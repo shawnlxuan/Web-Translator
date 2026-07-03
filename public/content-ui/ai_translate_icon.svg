@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" role="img" aria-label="AI translation icon">
+  <defs>
+    <linearGradient id="cardLight" x1="98" y1="72" x2="644" y2="642" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C4B5FD"/>
+      <stop offset="0.52" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="cardDark" x1="408" y1="398" x2="978" y2="976" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="0.48" stop-color="#6D28D9"/>
+      <stop offset="1" stop-color="#4C1D95"/>
+    </linearGradient>
+    <linearGradient id="charWen" x1="128" y1="128" x2="560" y2="552" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F1E9FF"/>
+    </linearGradient>
+    <linearGradient id="charA" x1="500" y1="500" x2="862" y2="884" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9D5FF"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M51.2 51.2m102.4 0l409.6 0q102.4 0 102.4 102.4l0 409.6q0 102.4-102.4 102.4l-409.6 0q-102.4 0-102.4-102.4l0-409.6q0-102.4 102.4-102.4Z" fill="url(#cardLight)"/>
+  <path d="M195.584 543.5904L128 494.848c69.9392-45.9776 123.8016-84.0704 161.6896-114.176l-7.5776-8.2944c-22.7328-25.3952-46.8992-58.0608-72.6016-97.8944l-7.2704-11.3664H143.36v-76.8h164.0448V128h76.8v58.3168H552.96v76.8H493.5168l-5.7856 9.728c-28.0576 46.08-54.5792 82.5856-79.6672 109.568 37.7344 29.7984 90.9312 67.2768 159.5904 112.4352l-63.232 54.8864c-66.6112-47.7696-118.1696-86.3232-154.7776-115.712-36.3008 28.3648-87.6544 64.8704-154.0608 109.568z m152.2688-215.8592a646.2464 646.2464 0 0 1-52.0704-64.512H399.872c-17.408 24.3712-34.7648 45.824-52.0192 64.512z" fill="url(#charWen)" fill-rule="evenodd" clip-rule="evenodd"/>
+
+  <path d="M384 384m102.4 0l409.6 0q102.4 0 102.4 102.4l0 409.6q0 102.4-102.4 102.4l-409.6 0q-102.4 0-102.4-102.4l0-409.6q0-102.4 102.4-102.4Z" fill="url(#cardDark)"/>
+  <path d="M576 883.2h-76.8l153.6-384h76.8l153.6 384h-76.8l-30.72-76.8h-168.96l-30.72 76.8z m168.96-153.6h-107.52l53.76-134.4 53.76 134.4z" fill="url(#charA)" fill-rule="evenodd" clip-rule="evenodd"/>
+
+  <path d="M51.2 844.8A128 128 0 0 0 179.2 972.8h97.28a30.72 30.72 0 0 0 30.72-30.72v-21.7088a30.72 30.72 0 0 0-30.72-30.72H202.0864c-35.328 0-64-28.672-64-64V747.52a30.72 30.72 0 0 0-30.72-30.72H81.92a30.72 30.72 0 0 0-30.72 30.72v97.28z" fill="#5B21B6" opacity="0.95"/>
+  <path d="M716.8 105.1136a30.72 30.72 0 0 0 30.72 30.72h75.6736c35.328 0 64 28.672 64 64V276.48a30.72 30.72 0 0 0 30.72 30.72h24.1664a30.72 30.72 0 0 0 30.72-30.72V179.2l-0.2048-7.5264A128 128 0 0 0 844.8 51.2h-97.28a30.72 30.72 0 0 0-30.72 30.72v23.1936z" fill="#A78BFA" opacity="0.95"/>
+</svg>

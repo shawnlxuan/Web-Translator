@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "网页翻译",
+  "description": "AI-powered immersive webpage translation with context awareness",
+  "version": "1.0.0",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    {
+      "resources": ["content-ui/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "toggle-translation": {
+      "suggested_key": { "default": "Alt+T" },
+      "description": "Toggle page translation"
+    },
+    "toggle-mode": {
+      "suggested_key": { "default": "Alt+M" },
+      "description": "Toggle display mode (bilingual / replace)"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "网页翻译",
+    "default_popup": "entrypoints/popup/index.html"
+  },
+  "options_ui": {
+    "page": "entrypoints/options/index.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-scripts/content.js"],
+      "css": ["content-scripts/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

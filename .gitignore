@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.*
+
+# Build output
+.output/
+.wxt/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+.nyc_output/
+
+# Caches
+.vite/
+.vite-temp/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crx
+
+# Local agent/tool state
+.codex/
+.agents/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# Windows alternate data streams copied into WSL
+*:Zone.Identifier

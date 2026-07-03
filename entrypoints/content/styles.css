@@ -1,0 +1,215 @@
+/* ============================================================ */
+/* Content Script Styles — injected into translated pages       */
+/* CSS prefix: .tr- to avoid conflicts with page styles         */
+/* ============================================================ */
+
+/* Bilingual inline display */
+.tr-original {
+  /* Preserved as-is */
+}
+
+.tr-translation {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: italic;
+  margin-left: 0.25em;
+}
+
+.tr-translation::before {
+  content: ' → ';
+  color: #9ca3af;
+  font-style: normal;
+}
+
+/* Bilingual block display (headings, paragraphs) */
+.tr-block-wrapper {
+  display: block;
+}
+
+.tr-block-original {
+  display: block;
+  opacity: 0.7;
+}
+
+.tr-block-translation {
+  display: block;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  border-left: 3px solid currentColor;
+  padding-left: 1em;
+  margin: 0.25em 0;
+}
+
+.tr-inline-right-translation {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  margin-left: 0.45em;
+  white-space: normal;
+}
+
+.tr-table-translation {
+  display: block;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  line-height: inherit;
+  margin-top: 0.2em;
+  padding: 0;
+  border: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+
+.tr-loading-indicator {
+  display: inline-flex;
+  width: 26px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  margin-left: 0.42em;
+  vertical-align: -1px;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.tr-loading-char {
+  line-height: 1;
+  opacity: 0.38;
+  transform-origin: center;
+}
+
+.tr-loading-char-source {
+  animation: tr-translate-source 1.15s ease-in-out infinite;
+}
+
+.tr-loading-char-target {
+  animation: tr-translate-target 1.15s ease-in-out infinite;
+}
+
+.tr-loading-bridge {
+  position: relative;
+  width: 8px;
+  height: 1px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.24;
+  overflow: hidden;
+}
+
+.tr-loading-bridge::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -45%;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0.9;
+  animation: tr-translate-sweep 1.15s ease-in-out infinite;
+}
+
+@keyframes tr-translate-source {
+  0%, 100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(1);
+  }
+  28% {
+    opacity: 1;
+    transform: translateY(-0.04em) scale(1.08);
+  }
+  58% {
+    opacity: 0.42;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tr-translate-target {
+  0%, 32% {
+    opacity: 0.35;
+    transform: translateY(0) scale(1);
+  }
+  68% {
+    opacity: 1;
+    transform: translateY(-0.04em) scale(1.08);
+  }
+  100% {
+    opacity: 0.42;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tr-translate-sweep {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.9;
+  }
+  78% {
+    transform: translateX(320%);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateX(320%);
+    opacity: 0;
+  }
+}
+
+/* Floating panel (Shadow DOM) */
+.tr-floating-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 12px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.2s;
+}
+
+.tr-floating-panel:hover {
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.2);
+}
+
+.tr-floating-panel:active {
+  cursor: grabbing;
+}
+
+/* Quality badge */
+.tr-quality-badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.tr-quality-good { background: #22c55e; }
+.tr-quality-suspicious { background: #eab308; }
+.tr-quality-error { background: #ef4444; }
+
+/* Translation highlight on hover */
+.tr-translated:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 2px;
+}
