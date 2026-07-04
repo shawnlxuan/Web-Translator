@@ -4,6 +4,7 @@
 // ============================================================
 
 import type { SegmentContext } from '../../shared/types';
+import { DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -18,11 +19,12 @@ export function buildTranslationPrompt(
   context: SegmentContext,
   sourceLang: string,
   targetLang: string,
+  customPromptTemplate?: string,
 ): { systemPrompt: string; userMessage: string } {
   const sourceName = getLanguageName(sourceLang);
   const targetName = getLanguageName(targetLang);
 
-  const systemPrompt = buildSystemPrompt(sourceName, targetName);
+  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate);
   const userMessage = buildUserMessage(sentence, context, targetName);
 
   return { systemPrompt, userMessage };
@@ -37,11 +39,12 @@ export function buildBatchPrompt(
   sourceLang: string,
   targetLang: string,
   pageContext: Pick<SegmentContext, 'pageTitle' | 'pageMetaDescription' | 'headingPath'>,
+  customPromptTemplate?: string,
 ): { systemPrompt: string; userMessage: string } {
   const sourceName = getLanguageName(sourceLang);
   const targetName = getLanguageName(targetLang);
 
-  const systemPrompt = buildSystemPrompt(sourceName, targetName);
+  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate);
 
   const parts: string[] = [];
 
@@ -85,19 +88,18 @@ export function buildBatchPrompt(
 /**
  * Build the system prompt for translation.
  */
-function buildSystemPrompt(sourceName: string, targetName: string): string {
-  return [
-    `You are an expert translator. Translate the given text from ${sourceName} to ${targetName}.`,
-    '',
-    'Rules:',
-    '1. Preserve the original meaning, tone, and register.',
-    '2. For UI elements (buttons, links, labels), use concise, natural equivalents.',
-    '3. For headings, maintain appropriate heading style.',
-    '4. For technical terms, prefer commonly accepted translations in the target language.',
-    '5. For proper nouns (names, brands, places), preserve the original unless a well-known translated name exists.',
-    '6. DO NOT translate code, URLs, numerical values, or technical identifiers.',
-    '7. Return ONLY the translation text. No explanations, no notes, no quotation marks.',
-  ].join('\n');
+function buildSystemPrompt(
+  sourceName: string,
+  targetName: string,
+  customPromptTemplate?: string,
+): string {
+  const template = customPromptTemplate?.trim()
+    ? customPromptTemplate
+    : DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+
+  return template
+    .replaceAll('{{sourceLanguage}}', sourceName)
+    .replaceAll('{{targetLanguage}}', targetName);
 }
 
 /**

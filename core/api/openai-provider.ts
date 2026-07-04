@@ -143,5 +143,6 @@ function buildOpenAIBatchPrompt(request: TranslationRequest) {
     request.sourceLang,
     request.targetLang,
     pageContext,
+    request.customPromptTemplate,
   );
 }

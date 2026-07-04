@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Settings } from '../../shared/types';
-import { DEFAULT_SETTINGS } from '../../shared/constants';
+import { DEFAULT_SETTINGS, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
 import ApiConfig from './components/ApiConfig';
 
 const SETTINGS_KEY = 'ai_translator_settings';
@@ -65,10 +65,53 @@ const App: React.FC = () => {
       <ApiConfig settings={settings} onSave={saveSettings} />
 
       <TranslationSettings settings={settings} onSave={saveSettings} />
+      <PromptSettings settings={settings} onSave={saveSettings} />
       <AdvancedSettings settings={settings} onSave={saveSettings} />
 
       <div className="app-footer">
         网页翻译 v1.0.0 · API 密钥仅存储在本地浏览器中
+      </div>
+    </div>
+  );
+};
+
+// ---- 提示词设置 ----
+const PromptSettings: React.FC<{
+  settings: Settings;
+  onSave: (s: Settings) => void;
+}> = ({ settings, onSave }) => {
+  const [local, setLocal] = useState(settings);
+  useEffect(() => setLocal(settings), [settings]);
+
+  const promptTemplate = local.customPromptTemplate ?? DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+
+  return (
+    <div className="section">
+      <div className="section-header">
+        <h2 className="section-title">提示词设置</h2>
+        <div className="section-actions">
+          <button
+            className="secondary-btn"
+            onClick={() => setLocal({ ...local, customPromptTemplate: DEFAULT_SYSTEM_PROMPT_TEMPLATE })}
+          >
+            恢复默认
+          </button>
+          <button className="save-btn" onClick={() => onSave(local)}>保存</button>
+        </div>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">系统提示词模板</label>
+        <textarea
+          value={promptTemplate}
+          onChange={e => setLocal({ ...local, customPromptTemplate: e.target.value })}
+          className="form-textarea"
+          rows={11}
+          spellCheck={false}
+        />
+        <p className="form-hint">
+          占位符：{'{{sourceLanguage}}'}、{'{{targetLanguage}}'}。空内容按默认提示词执行。
+        </p>
       </div>
     </div>
   );

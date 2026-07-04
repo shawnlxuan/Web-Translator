@@ -5,6 +5,7 @@
 
 import type { SegmentContext } from '../../shared/types';
 import { hashStrings } from '../../shared/utils';
+import { DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
 
 /**
  * Compute a deterministic cache key for a sentence translation.
@@ -25,7 +26,9 @@ export async function computeCacheKey(
     SegmentContext,
     'headingPath' | 'textType' | 'tagName'
   >,
+  customPromptTemplate?: string,
 ): Promise<string> {
+  const promptVariant = getPromptCacheVariant(customPromptTemplate);
   const payload = JSON.stringify({
     text: sentence.trim(),
     sourceLang,
@@ -33,9 +36,22 @@ export async function computeCacheKey(
     headingPath: context.headingPath.join('|'),
     textType: context.textType,
     tagName: context.tagName,
+    ...(promptVariant ? { promptTemplate: promptVariant } : {}),
   });
 
   return hashStrings([payload]);
+}
+
+function getPromptCacheVariant(customPromptTemplate?: string): string {
+  const normalized = normalizePromptTemplate(customPromptTemplate);
+  if (!normalized || normalized === normalizePromptTemplate(DEFAULT_SYSTEM_PROMPT_TEMPLATE)) {
+    return '';
+  }
+  return normalized;
+}
+
+function normalizePromptTemplate(customPromptTemplate?: string): string {
+  return customPromptTemplate?.replace(/\r\n/g, '\n').trim() || '';
 }
 
 /**

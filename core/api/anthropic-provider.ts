@@ -55,6 +55,7 @@ export class AnthropicProvider implements LLMProvider {
       request.sourceLang,
       request.targetLang,
       pageContext,
+      request.customPromptTemplate,
     );
 
     const response = await fetch(`${this.baseUrl}/v1/messages`, {

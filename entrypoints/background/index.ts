@@ -226,6 +226,7 @@ async function handleSegmentsReady(
           msg.sourceLang,
           msg.targetLang,
           sentence.context,
+          settings.customPromptTemplate,
         );
         if (cached) {
           translationMap.set(idx, cached);
@@ -253,6 +254,7 @@ async function handleSegmentsReady(
           sourceLang: msg.sourceLang,
           targetLang: msg.targetLang,
           model: settings.models[settings.provider],
+          customPromptTemplate: settings.customPromptTemplate,
         });
 
         return response.translations;
@@ -270,6 +272,7 @@ async function handleSegmentsReady(
             msg.targetLang,
             source.sentence.context,
             translation.text,
+            settings.customPromptTemplate,
           );
         }),
       );

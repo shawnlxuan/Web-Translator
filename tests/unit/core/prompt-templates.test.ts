@@ -24,13 +24,57 @@ describe('buildTranslationPrompt', () => {
       'zh-CN',
     );
 
-    expect(systemPrompt).toContain('expert translator');
+    expect(systemPrompt).toContain('professional Chinese (Simplified) native translator');
     expect(systemPrompt).toContain('English');
     expect(systemPrompt).toContain('Chinese');
 
     expect(userMessage).toContain('TEXT TO TRANSLATE');
     expect(userMessage).toContain('quick brown fox');
     expect(userMessage).toContain('Chapter 1 > Introduction');
+  });
+
+  it('uses the immersive translation prompt as the default system prompt', () => {
+    const { systemPrompt } = buildTranslationPrompt(
+      'The quick brown fox jumps over the lazy dog.',
+      baseContext,
+      'en',
+      'zh-CN',
+    );
+
+    expect(systemPrompt).toContain('professional Chinese (Simplified) native translator');
+    expect(systemPrompt).toContain('Core Objective');
+    expect(systemPrompt).toContain('Proper Noun Handling');
+    expect(systemPrompt).toContain('Preserve the original paragraph count and overall format exactly.');
+    expect(systemPrompt).toContain('Return ONLY the translations in the numbered format requested by the user message.');
+    expect(systemPrompt).not.toContain('{{from}}');
+    expect(systemPrompt).not.toContain('{{to}}');
+  });
+
+  it('renders custom system prompt templates with language placeholders', () => {
+    const { systemPrompt, userMessage } = buildTranslationPrompt(
+      'The quick brown fox jumps over the lazy dog.',
+      baseContext,
+      'en',
+      'zh-CN',
+      'Translate from {{sourceLanguage}} into {{targetLanguage}} with concise wording.',
+    );
+
+    expect(systemPrompt).toBe('Translate from English into Chinese (Simplified) with concise wording.');
+    expect(userMessage).toContain('TEXT TO TRANSLATE');
+  });
+
+  it('falls back to the default system prompt when the custom template is blank', () => {
+    const { systemPrompt } = buildTranslationPrompt(
+      'The quick brown fox jumps over the lazy dog.',
+      baseContext,
+      'en',
+      'zh-CN',
+      '   ',
+    );
+
+    expect(systemPrompt).toContain('professional Chinese (Simplified) native translator');
+    expect(systemPrompt).toContain('English');
+    expect(systemPrompt).toContain('Chinese (Simplified)');
   });
 
   it('includes heading hierarchy in user message', () => {
@@ -117,6 +161,23 @@ describe('buildTranslationPrompt', () => {
     expect(userMessage).toContain('- Before: Previous sentence one. / Previous sentence two.');
     expect(userMessage).toContain('- After: Next sentence one. / Next sentence two.');
     expect(userMessage).toContain('- Related: Cancel | Learn more');
+    expect(userMessage).toContain('[#1] Start now');
+  });
+
+  it('renders custom system prompt templates for batch prompts', () => {
+    const { systemPrompt, userMessage } = buildBatchPrompt(
+      [{ index: 0, text: 'Start now', context: baseContext }],
+      'en',
+      'zh-CN',
+      {
+        pageTitle: '',
+        pageMetaDescription: '',
+        headingPath: [],
+      },
+      'Batch translate {{sourceLanguage}} to {{targetLanguage}}.',
+    );
+
+    expect(systemPrompt).toBe('Batch translate English to Chinese (Simplified).');
     expect(userMessage).toContain('[#1] Start now');
   });
 });

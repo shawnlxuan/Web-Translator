@@ -45,8 +45,15 @@ export class CacheManager {
     sourceLang: string,
     targetLang: string,
     context: Pick<SegmentContext, 'headingPath' | 'textType' | 'tagName'>,
+    customPromptTemplate?: string,
   ): Promise<string | null> {
-    const key = await computeCacheKey(sentence, sourceLang, targetLang, context);
+    const key = await computeCacheKey(
+      sentence,
+      sourceLang,
+      targetLang,
+      context,
+      customPromptTemplate,
+    );
 
     // Tier 1: Memory cache
     const memResult = this.memoryCache.get(key);
@@ -74,8 +81,15 @@ export class CacheManager {
     targetLang: string,
     context: Pick<SegmentContext, 'headingPath' | 'textType' | 'tagName'>,
     translation: string,
+    customPromptTemplate?: string,
   ): Promise<void> {
-    const key = await computeCacheKey(sentence, sourceLang, targetLang, context);
+    const key = await computeCacheKey(
+      sentence,
+      sourceLang,
+      targetLang,
+      context,
+      customPromptTemplate,
+    );
 
     // Store in memory (fire and forget for storage)
     this.memoryCache.set(key, translation);
@@ -129,6 +143,7 @@ export class CacheManager {
     }>,
     sourceLang: string,
     targetLang: string,
+    customPromptTemplate?: string,
   ): Promise<Map<string, string>> {
     const results = new Map<string, string>();
 
@@ -138,6 +153,7 @@ export class CacheManager {
         sourceLang,
         targetLang,
         s.context,
+        customPromptTemplate,
       );
       if (translation !== null) {
         results.set(s.text, translation);

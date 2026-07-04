@@ -141,7 +141,7 @@ export interface Settings {
   translationColor: string;
   bilingualStyle: 'inline' | 'block';
   enableMutationObserver: boolean;
-  customPromptTemplate?: string;
+  customPromptTemplate: string;
 }
 
 /** State of the translation process on a page */

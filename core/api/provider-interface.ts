@@ -22,6 +22,7 @@ export interface TranslationRequest {
   sourceLang: string;
   targetLang: string;
   model: string;
+  customPromptTemplate?: string;
 }
 
 /** Response for a non-streaming batch translation */
