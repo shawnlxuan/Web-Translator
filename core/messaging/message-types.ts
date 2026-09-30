@@ -2,7 +2,14 @@
 // Type-safe message definitions for extension IPC
 // ============================================================
 
-import type { Settings, DisplayMode, TranslationProgress, TranslationState } from '../../shared/types';
+import type {
+  Settings,
+  DisplayMode,
+  ProviderProfile,
+  SegmentContext,
+  TranslationProgress,
+  TranslationState,
+} from '../../shared/types';
 
 // ---- Popup → Background ----
 
@@ -31,6 +38,7 @@ export interface ClearCacheMessage {
 
 export interface TestApiConnectionMessage {
   type: 'TEST_API_CONNECTION';
+  profile: ProviderProfile;
 }
 
 export interface GetTranslationStatePopupMessage {
@@ -39,9 +47,20 @@ export interface GetTranslationStatePopupMessage {
 
 export interface FetchModelsMessage {
   type: 'FETCH_MODELS';
-  provider: string;
-  apiKey: string;
-  endpoint: string;
+  profile: ProviderProfile;
+}
+
+export interface TranslateTextMessage {
+  type: 'TRANSLATE_TEXT';
+  text: string;
+  sourceLang: string;
+  targetLang: string;
+}
+
+export interface TranslateSelectionMessage {
+  type: 'TRANSLATE_SELECTION';
+  text: string;
+  context: SegmentContext;
 }
 
 /** All messages sent from popup/options to background */
@@ -53,7 +72,8 @@ export type PopupToBackgroundMessage =
   | ClearCacheMessage
   | TestApiConnectionMessage
   | GetTranslationStatePopupMessage
-  | FetchModelsMessage;
+  | FetchModelsMessage
+  | TranslateTextMessage;
 
 // ---- Background → Content Script ----
 
@@ -63,10 +83,16 @@ export interface ExecuteTranslationMessage {
   targetLang: string;
   sourceLang: string;
   displayMode: DisplayMode;
+  batchSize: number;
+  maxConcurrentCalls: number;
+  contextWindowSize: number;
+  translationColor: string;
+  enableMutationObserver: boolean;
 }
 
 export interface InjectTranslationsMessage {
   type: 'INJECT_TRANSLATIONS';
+  pageId: string;
   translations: Array<{
     segmentId: string;
     sentenceIndex: number;
@@ -81,12 +107,18 @@ export interface ToggleDisplayModeMessage {
 
 export interface ContentStopTranslationMessage {
   type: 'STOP_TRANSLATION';
+  pageId: string;
 }
 
 export interface ContentTranslationErrorMessage {
   type: 'TRANSLATION_ERROR';
   pageId: string | null;
   error: string;
+}
+
+export interface TriggerSelectionTranslationMessage {
+  type: 'TRIGGER_SELECTION_TRANSLATION';
+  selectionText?: string;
 }
 
 /** All messages sent from background to content script */
@@ -96,7 +128,8 @@ export type BackgroundToContentMessage =
   | ToggleDisplayModeMessage
   | GetTranslationStateMessage
   | ContentStopTranslationMessage
-  | ContentTranslationErrorMessage;
+  | ContentTranslationErrorMessage
+  | TriggerSelectionTranslationMessage;
 
 // ---- Content Script → Background ----
 
@@ -109,7 +142,7 @@ export interface SegmentsReadyMessage {
     segmentId: string;
     sentenceIndex: number;
     sentence: string;
-    context: any; // SegmentContext (serialized)
+    context: SegmentContext;
   }>;
 }
 
@@ -147,6 +180,7 @@ export interface TranslationStateUpdateMessage {
 /** All messages sent from content script to background */
 export type ContentToBackgroundMessage =
   | SegmentsReadyMessage
+  | TranslateSelectionMessage
   | TranslationProgressUpdateMessage
   | TranslationCompleteMessage
   | TranslationErrorMessage
@@ -191,6 +225,20 @@ export interface FetchModelsResponse {
   error?: string;
 }
 
+export interface TranslateTextResponse {
+  type: 'TRANSLATE_TEXT_RESPONSE';
+  success: boolean;
+  translation?: string;
+  error?: string;
+}
+
+export interface TranslateSelectionResponse {
+  type: 'TRANSLATE_SELECTION_RESPONSE';
+  success: boolean;
+  translation?: string;
+  error?: string;
+}
+
 /** All response messages from background to popup/options */
 export type BackgroundToPopupMessage =
   | SettingsResponse
@@ -199,7 +247,9 @@ export type BackgroundToPopupMessage =
   | TranslationStoppedResponse
   | CacheClearedResponse
   | ApiTestResponse
-  | FetchModelsResponse;
+  | FetchModelsResponse
+  | TranslateTextResponse
+  | TranslateSelectionResponse;
 
 // ---- Union of all possible messages ----
 

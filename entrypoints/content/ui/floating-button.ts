@@ -128,7 +128,6 @@ class FloatingTranslateButton {
   private icon: HTMLImageElement;
   private check: HTMLSpanElement;
   private options: FloatingButtonOptions;
-  private state = TranslationState.IDLE;
   private position: StoredFloatingPosition | null = null;
   private dragStart: {
     pointerId: number;
@@ -177,7 +176,6 @@ class FloatingTranslateButton {
   }
 
   setState(state: TranslationState): void {
-    this.state = state;
     const viewState = getFloatingButtonViewState(state);
     this.button.dataset.mode = viewState.mode;
     this.button.title = viewState.title;

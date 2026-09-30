@@ -41,7 +41,9 @@ export function collectContext(
   sentenceIndex: number,
   segment: Segment,
   allNodes: ExtractedTextNode[],
+  contextWindowSize: number = 3,
 ): SegmentContext {
+  const windowSize = Math.max(0, Math.floor(contextWindowSize));
   // Lazy-init page metadata
   if (!cachedMetadata) {
     cachedMetadata = extractPageMetadata();
@@ -62,12 +64,14 @@ export function collectContext(
   const { beforeSentences, afterSentences } = collectNeighborSentences(
     segment.sentences,
     sentenceIndex,
+    windowSize,
   );
 
   // Cross-block neighbors
   const { beforeTexts, afterTexts } = collectCrossBlockNeighbors(
     segment.textNodes[0],
     allNodes,
+    windowSize,
   );
 
   // Sibling context
@@ -83,8 +87,8 @@ export function collectContext(
     pageLanguage: cachedMetadata.pageLanguage,
     headingPath,
     sectionTitle: headingPath.length > 0 ? headingPath[headingPath.length - 1] : undefined,
-    beforeSentences: mergeUnique(beforeSentences, beforeTexts).slice(0, 6),
-    afterSentences: mergeUnique(afterSentences, afterTexts).slice(0, 6),
+    beforeSentences: mergeUnique(beforeSentences, beforeTexts).slice(0, windowSize),
+    afterSentences: mergeUnique(afterSentences, afterTexts).slice(0, windowSize),
     siblingContext: siblingContext || undefined,
   };
 }
@@ -95,9 +99,10 @@ export function collectContext(
 export function collectSegmentContexts(
   segment: Segment,
   allNodes: ExtractedTextNode[],
+  contextWindowSize: number = 3,
 ): SegmentContext[] {
   return segment.sentences.map((sentence, index) =>
-    collectContext(sentence, index, segment, allNodes),
+    collectContext(sentence, index, segment, allNodes, contextWindowSize),
   );
 }
 

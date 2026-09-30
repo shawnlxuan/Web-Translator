@@ -11,7 +11,9 @@ let displayManager: DisplayManager | null = null;
 /**
  * Initialize the text injector with a display mode.
  */
-export function initInjector(mode: DisplayMode): DisplayManager {
+export function initInjector(
+  mode: DisplayMode,
+): DisplayManager {
   displayManager = new DisplayManager(mode);
   return displayManager;
 }

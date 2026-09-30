@@ -2,7 +2,7 @@
 // Mutation Watcher — Observe and translate dynamically loaded content
 // ============================================================
 
-import { DATA_TRANSLATED_ATTR } from '../../../shared/constants';
+import { resolveDynamicContentRoot } from './dynamic-content-roots';
 
 export type NewContentCallback = (newNodes: Node[]) => void;
 
@@ -35,18 +35,10 @@ export class MutationWatcher {
         // Only observe added nodes
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           for (const node of mutation.addedNodes) {
-            // Skip our own injected elements
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              const el = node as Element;
-              if (el.hasAttribute(DATA_TRANSLATED_ATTR)) continue;
-              if (el.querySelector(`[${DATA_TRANSLATED_ATTR}]`)) continue;
-            }
-
-            // Skip text-only mutations (characterData) to avoid feedback loops
-            if (node.nodeType === Node.ELEMENT_NODE) {
-              this.pendingNodes.add(node);
-              hasNewContent = true;
-            }
+            const root = resolveDynamicContentRoot(node);
+            if (!root) continue;
+            this.pendingNodes.add(root);
+            hasNewContent = true;
           }
         }
       }
@@ -59,8 +51,8 @@ export class MutationWatcher {
     this.observer.observe(document.body, {
       childList: true,
       subtree: true,
-      // Do NOT observe characterData — that's how our own text injections
-      // would trigger a feedback loop
+      // Character-data edits are intentionally outside the DOM-additions scope.
+      // Observing them would also feed replace-mode writes back into translation.
     });
   }
 

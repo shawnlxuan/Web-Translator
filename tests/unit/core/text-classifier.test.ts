@@ -104,6 +104,30 @@ describe('shouldSkipNode', () => {
 
     expect(shouldSkipNode(textNode)).toBe(true);
   });
+
+  it('allows new text below a translated source block for dynamic extraction', () => {
+    const translated = new FakeElement('p');
+    translated.setAttribute('data-tr-translated', 'true');
+    const dynamicRoot = new FakeElement('span');
+    dynamicRoot.parentElement = translated;
+    const text = new FakeElement('span');
+    text.parentElement = dynamicRoot;
+    const textNode = { parentElement: text } as unknown as Node;
+
+    expect(shouldSkipNode(textNode, { dynamicRoot: dynamicRoot as unknown as Element }))
+      .toBe(false);
+  });
+
+  it('still skips extension-injected text during dynamic extraction', () => {
+    const dynamicRoot = new FakeElement('span');
+    dynamicRoot.setAttribute('data-tr-injected', 'true');
+    const text = new FakeElement('span');
+    text.parentElement = dynamicRoot;
+    const textNode = { parentElement: text } as unknown as Node;
+
+    expect(shouldSkipNode(textNode, { dynamicRoot: dynamicRoot as unknown as Element }))
+      .toBe(true);
+  });
 });
 
 describe('findBlockElement', () => {

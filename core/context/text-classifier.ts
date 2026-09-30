@@ -133,27 +133,59 @@ function findEmbeddedTextContainer(element: Element | null): Element | null {
 /**
  * Check if a text node should be skipped during extraction.
  */
-export function shouldSkipNode(node: Node): boolean {
+export interface SkipNodeOptions {
+  dynamicRoot?: Element;
+}
+
+export function shouldSkipNode(
+  node: Node,
+  options: SkipNodeOptions = {},
+): boolean {
   const parent = node.parentElement;
   if (!parent) return true;
 
   // Check tag name
   if (shouldSkipElement(parent)) return true;
   if (isVisuallyHiddenElement(parent)) return true;
-  if (parent.hasAttribute(DATA_TRANSLATED_ATTR)) return true;
+  if (isExtensionOwnedElement(parent)) return true;
+  if (
+    parent.hasAttribute(DATA_TRANSLATED_ATTR)
+    && !isAllowedDynamicSourceAncestor(parent, options.dynamicRoot)
+  ) return true;
 
   // Check for any skipped ancestors
   let ancestor = parent.parentElement;
   while (ancestor) {
     if (shouldSkipElement(ancestor)) return true;
     if (isVisuallyHiddenElement(ancestor)) return true;
-    if (ancestor.hasAttribute(DATA_TRANSLATED_ATTR)) return true;
+    if (isExtensionOwnedElement(ancestor)) return true;
+    if (
+      ancestor.hasAttribute(DATA_TRANSLATED_ATTR)
+      && !isAllowedDynamicSourceAncestor(ancestor, options.dynamicRoot)
+    ) return true;
     if (ancestor.getAttribute('contenteditable') === 'true') return true;
     if (ancestor.getAttribute('role') === 'textbox') return true;
     if (ancestor.getAttribute('data-tr-ignore') === 'true') return true;
     ancestor = ancestor.parentElement;
   }
 
+  return false;
+}
+
+function isExtensionOwnedElement(element: Element): boolean {
+  return element.hasAttribute('data-tr-injected')
+    || element.hasAttribute('data-tr-loading');
+}
+
+function isAllowedDynamicSourceAncestor(
+  element: Element,
+  dynamicRoot?: Element,
+): boolean {
+  let current: Element | null | undefined = dynamicRoot;
+  while (current) {
+    if (current === element) return true;
+    current = current.parentElement;
+  }
   return false;
 }
 

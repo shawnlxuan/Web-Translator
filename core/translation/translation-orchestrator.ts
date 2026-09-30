@@ -8,6 +8,7 @@ import { extractTextNodes } from '../../entrypoints/content/dom/text-extractor';
 import { buildSegments } from '../../entrypoints/content/dom/segment-builder';
 import { createBatches } from './batch-manager';
 import { detectLanguage, shouldSkipTranslationForTarget } from '../segmentation/language-detector';
+import { resetContextCache } from '../context/context-collector';
 
 export interface TranslationPipelineResult {
   extractedNodes: ExtractedTextNode[];
@@ -24,7 +25,10 @@ export function runExtractionPipeline(
   targetLang: string,
   sourceLang?: string,
   batchSize: number = 10,
+  contextWindowSize: number = 3,
 ): TranslationPipelineResult {
+  resetContextCache();
+
   // Step 1: Extract text nodes
   const extractedNodes = extractTextNodes();
 
@@ -46,6 +50,7 @@ export function runExtractionPipeline(
     batchSize,
     sourceLang: detectedLang,
     targetLang,
+    contextWindowSize,
   });
 
   return {

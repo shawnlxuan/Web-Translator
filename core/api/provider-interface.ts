@@ -50,9 +50,12 @@ export class ProviderError extends Error {
   constructor(
     public provider: string,
     public statusCode: number,
-    public details: any,
+    public details: unknown,
   ) {
-    super(`[${provider}] HTTP ${statusCode}: ${JSON.stringify(details)}`);
+    const detailText = typeof details === 'string'
+      ? details
+      : JSON.stringify(details);
+    super(`${provider} 请求失败（HTTP ${statusCode}）${detailText ? `：${detailText}` : ''}`);
     this.name = 'ProviderError';
   }
 }
@@ -84,13 +87,6 @@ export interface LLMProvider {
     request: TranslationRequest,
   ): AsyncIterable<StreamDelta>;
 
-  /**
-   * Validate an API key by making a minimal API call.
-   */
-  validateApiKey(apiKey: string): Promise<boolean>;
-
-  /**
-   * List available models (if supported by the provider).
-   */
-  listModels?(apiKey: string): Promise<string[]>;
+  /** Test the configured endpoint, API key, and model with a minimal request. */
+  testConnection(model: string): Promise<void>;
 }

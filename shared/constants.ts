@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Settings } from './types';
+import { createBuiltinProviderProfiles } from './provider-presets';
 
 /** Default editable system prompt template. */
 export const DEFAULT_SYSTEM_PROMPT_TEMPLATE = [
@@ -32,52 +33,11 @@ export const DEFAULT_SYSTEM_PROMPT_TEMPLATE = [
   '- Bad: 将双子座-2.5-专业实验版添加到光标',
 ].join('\n');
 
-/** Default API endpoints */
-export const API_ENDPOINTS = {
-  openai: 'https://api.openai.com/v1',
-  anthropic: 'https://api.anthropic.com',
-  deepseek: 'https://api.deepseek.com/v1',
-  glm: 'https://open.bigmodel.cn/api/paas/v4',
-  mimo: 'https://api.minimax.chat/v1',
-} as const;
-
-/** Default models per provider */
-export const DEFAULT_MODELS = {
-  openai: 'gpt-4o',
-  anthropic: 'claude-sonnet-4-20250514',
-  deepseek: 'deepseek-chat',
-  glm: 'glm-4-flash',
-  mimo: 'abab6.5s-chat',
-  custom: 'gpt-4o',
-} as const;
-
 /** Default settings */
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'openai',
-  apiKeys: {
-    openai: '',
-    anthropic: '',
-    deepseek: '',
-    glm: '',
-    mimo: '',
-    custom: '',
-  },
-  models: {
-    openai: 'gpt-4o',
-    anthropic: 'claude-sonnet-4-20250514',
-    deepseek: 'deepseek-chat',
-    glm: 'glm-4-flash',
-    mimo: 'abab6.5s-chat',
-    custom: 'gpt-4o',
-  },
-  customEndpoints: {
-    openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com',
-    deepseek: 'https://api.deepseek.com/v1',
-    glm: 'https://open.bigmodel.cn/api/paas/v4',
-    mimo: 'https://api.minimax.chat/v1',
-    custom: '',
-  },
+  settingsVersion: 2,
+  activeProviderId: 'builtin:openai',
+  providerProfiles: createBuiltinProviderProfiles(),
   sourceLang: 'auto',
   targetLang: 'zh-CN',
   displayMode: 'bilingual',
@@ -86,8 +46,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cacheTTLDays: 30,
   maxConcurrentCalls: 5,
   translationColor: '#6366f1',
-  bilingualStyle: 'inline',
   enableMutationObserver: true,
+  showSelectionTranslateButton: true,
   customPromptTemplate: DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 };
 
@@ -158,11 +118,14 @@ export const MESSAGE_TYPES = {
   UPDATE_SETTINGS: 'UPDATE_SETTINGS',
   CLEAR_CACHE: 'CLEAR_CACHE',
   TEST_API_CONNECTION: 'TEST_API_CONNECTION',
+  TRANSLATE_TEXT: 'TRANSLATE_TEXT',
+  TRANSLATE_SELECTION: 'TRANSLATE_SELECTION',
 
   // Background → Content Script
   EXECUTE_TRANSLATION: 'EXECUTE_TRANSLATION',
   INJECT_TRANSLATIONS: 'INJECT_TRANSLATIONS',
   TOGGLE_DISPLAY_MODE: 'TOGGLE_DISPLAY_MODE',
+  TRIGGER_SELECTION_TRANSLATION: 'TRIGGER_SELECTION_TRANSLATION',
 
   // Content Script → Background
   SEGMENTS_READY: 'SEGMENTS_READY',

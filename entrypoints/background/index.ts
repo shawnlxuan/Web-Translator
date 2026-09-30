@@ -6,29 +6,69 @@
 import { onPopupMessage } from '../../core/messaging/message-utils';
 import { loadSettings, updateSettings } from '../../core/storage/settings-store';
 import { createProvider } from '../../core/api/provider-factory';
+import {
+  fetchProviderModels,
+  testProviderConnection,
+} from '../../core/api/provider-tools';
 import { RateLimiter } from '../../core/api/rate-limiter';
 import { CacheManager } from '../../core/cache/cache-manager';
+import {
+  createTranslationRunSnapshot,
+  type TranslationRunSnapshot,
+} from '../../core/translation/translation-run';
+import { CachedTranslationService } from '../../core/translation/translation-service';
+import { translateManualText } from '../../core/translation/manual-translation';
+import {
+  ActiveRunRegistry,
+  createPageId,
+} from '../../core/translation/active-run-registry';
+import { createExecuteTranslationMessage } from '../../core/messaging/page-translation-messages';
+import {
+  deliverTranslationRunStart,
+  initializeTranslationRun,
+  processTranslationBatch,
+  stopTranslationRun,
+  type TranslationRunRecord,
+} from './translation-run-controller';
 import type {
   StartTranslationMessage,
   StopTranslationMessage,
   SegmentsReadyMessage,
   FetchModelsMessage,
   PopupToBackgroundMessage,
+  TestApiConnectionMessage,
+  TranslateTextMessage,
+  TranslateSelectionMessage,
 } from '../../core/messaging/message-types';
 
-// Rate limiter for API calls
-const rateLimiter = new RateLimiter();
+const SELECTION_CONTEXT_MENU_ID = 'translate-selected-text';
+
 let cacheManager = new CacheManager();
 let cacheManagerTTLDays = 30;
 
 // Track active translations per tab
-const activeTranslations = new Map<
-  number,
-  { pageId: string; isActive: boolean }
->();
+const activeTranslations = new ActiveRunRegistry<TranslationRunRecord>();
 
 // Background service worker entry point
 console.log('[AI Translator] Background service worker started');
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: SELECTION_CONTEXT_MENU_ID,
+      title: '翻译所选文本',
+      contexts: ['selection'],
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== SELECTION_CONTEXT_MENU_ID || tab?.id == null) return;
+
+  void triggerSelectionTranslation(tab.id, info.selectionText).catch((error) => {
+    console.warn('[AI Translator] Failed to trigger selection translation:', error);
+  });
+});
 
   // Handle messages from popup/options
   onPopupMessage(async (message) => {
@@ -82,7 +122,9 @@ console.log('[AI Translator] Background service worker started');
         return { type: 'CACHE_CLEARED' };
       }
       case 'TEST_API_CONNECTION':
-        return handleTestApiConnection();
+        return handleTestApiConnection(msg);
+      case 'TRANSLATE_TEXT':
+        return handleTranslateText(msg);
       default:
         console.warn('[AI Translator] Unknown message:', (msg as any).type);
     }
@@ -95,6 +137,15 @@ console.log('[AI Translator] Background service worker started');
         handleSegmentsReady(message as SegmentsReadyMessage, sender)
           .then(sendResponse)
           .catch((err) => sendResponse({ error: err.message }));
+        return true;
+      case 'TRANSLATE_SELECTION':
+        handleTranslateSelection(message as TranslateSelectionMessage)
+          .then(sendResponse)
+          .catch((err) => sendResponse({
+            type: 'TRANSLATE_SELECTION_RESPONSE',
+            success: false,
+            error: err.message,
+          }));
         return true;
       case 'START_TRANSLATION':
         if (sender.tab?.id == null) return false;
@@ -137,6 +188,9 @@ console.log('[AI Translator] Background service worker started');
         });
         break;
       }
+      case 'translate-selection':
+        await triggerSelectionTranslation(tabs[0].id).catch(() => {});
+        break;
     }
   });
 
@@ -152,32 +206,56 @@ async function handleStartTranslation(
     return { type: 'TRANSLATION_ERROR', error: 'No active tab found' };
   }
 
-  const settings = await loadSettings();
-  const pageId = `page-${tabId}`;
+  const run: TranslationRunRecord = {
+    pageId: createPageId(tabId),
+    isActive: true,
+    service: null,
+  };
+  activeTranslations.activate(tabId, run);
 
-  // Check API key
-  if (!settings.apiKeys[settings.provider]) {
+  const initialization = await initializeTranslationRun(
+    activeTranslations,
+    tabId,
+    run,
+    async () => createTranslationRunSnapshot(await loadSettings()),
+  );
+  if (initialization.status === 'stale') {
+    return { type: 'TRANSLATION_STOPPED' };
+  }
+  if (initialization.status === 'failed') {
+    return { type: 'TRANSLATION_ERROR', error: initialization.error };
+  }
+
+  const snapshot = initialization.snapshot;
+  const { settings } = snapshot;
+
+  try {
+    run.service = createCachedTranslationService(snapshot);
+  } catch (error: any) {
+    if (!activeTranslations.clearIfCurrent(tabId, run)) {
+      return { type: 'TRANSLATION_STOPPED' };
+    }
     return {
       type: 'TRANSLATION_ERROR',
-      error: 'No API key configured. Please set your API key in Settings.',
+      error: error.message,
     };
   }
 
-  activeTranslations.set(tabId, { pageId, isActive: true });
+  const delivery = await deliverTranslationRunStart(
+    activeTranslations,
+    tabId,
+    run,
+    createExecuteTranslationMessage(run.pageId, settings, msg),
+    sendToContent,
+  );
 
-  try {
-    await chrome.tabs.sendMessage(tabId, {
-      type: 'EXECUTE_TRANSLATION',
-      pageId,
-      targetLang: msg.targetLang || settings.targetLang,
-      sourceLang: msg.sourceLang || settings.sourceLang,
-      displayMode: settings.displayMode,
-    });
-    return { type: 'TRANSLATION_STARTED', pageId };
-  } catch (error: any) {
-    activeTranslations.delete(tabId);
-    return { type: 'TRANSLATION_ERROR', error: error.message };
+  if (delivery.status === 'started') {
+    return { type: 'TRANSLATION_STARTED', pageId: run.pageId };
   }
+  if (delivery.status === 'failed') {
+    return { type: 'TRANSLATION_ERROR', error: delivery.error };
+  }
+  return { type: 'TRANSLATION_STOPPED' };
 }
 
 async function handleStopTranslation(
@@ -187,8 +265,7 @@ async function handleStopTranslation(
   const tabId = requestedTabId ?? await getActiveTabId();
   if (tabId == null) return { type: 'TRANSLATION_STOPPED' };
 
-  activeTranslations.delete(tabId);
-  await chrome.tabs.sendMessage(tabId, { type: 'STOP_TRANSLATION' }).catch(() => {});
+  await stopTranslationRun(activeTranslations, tabId, sendToContent).catch(() => false);
   return { type: 'TRANSLATION_STOPPED' };
 }
 
@@ -208,105 +285,14 @@ async function handleSegmentsReady(
   const tabId = sender.tab?.id;
   if (!tabId) return;
 
-  const active = activeTranslations.get(tabId);
-  if (!active?.isActive) return;
-  if (active.pageId !== msg.pageId) return;
+  await processTranslationBatch(activeTranslations, tabId, msg, sendToContent);
+}
 
-  const settings = await loadSettings();
-
-  try {
-    rateLimiter.configure({ maxConcurrent: settings.maxConcurrentCalls || 3 });
-    const cache = getCacheManager(settings.cacheTTLDays);
-    const translationMap = new Map<number, string>();
-
-    await Promise.all(
-      msg.batch.map(async (sentence, idx) => {
-        const cached = await cache.get(
-          sentence.sentence,
-          msg.sourceLang,
-          msg.targetLang,
-          sentence.context,
-          settings.customPromptTemplate,
-        );
-        if (cached) {
-          translationMap.set(idx, cached);
-        }
-      }),
-    );
-
-    const uncachedBatch = msg.batch
-      .map((sentence, originalIndex) => ({ sentence, originalIndex }))
-      .filter(({ originalIndex }) => !translationMap.has(originalIndex));
-
-    if (uncachedBatch.length > 0) {
-      // Create provider only when cache misses require an API call.
-      const provider = createProvider(settings);
-
-      // Translate cache misses with rate limiting.
-      const translations = await rateLimiter.execute(async () => {
-        const response = await provider.translateBatch({
-          sentences: uncachedBatch.map(({ sentence }, idx) => ({
-            segmentId: sentence.segmentId,
-            index: idx,
-            text: sentence.sentence,
-            context: sentence.context as any,
-          })),
-          sourceLang: msg.sourceLang,
-          targetLang: msg.targetLang,
-          model: settings.models[settings.provider],
-          customPromptTemplate: settings.customPromptTemplate,
-        });
-
-        return response.translations;
-      });
-
-      await Promise.all(
-        translations.map(async (translation) => {
-          const source = uncachedBatch[translation.index];
-          if (!source || !translation.text.trim()) return;
-
-          translationMap.set(source.originalIndex, translation.text);
-          await cache.set(
-            source.sentence.sentence,
-            msg.sourceLang,
-            msg.targetLang,
-            source.sentence.context,
-            translation.text,
-            settings.customPromptTemplate,
-          );
-        }),
-      );
-    }
-
-    const missing = msg.batch.filter((_, idx) => {
-      const text = translationMap.get(idx);
-      return !text || text.trim().length === 0;
-    });
-
-    if (missing.length > 0) {
-      throw new Error(
-        `Translation response incomplete: ${missing.length}/${msg.batch.length} sentences missing`,
-      );
-    }
-
-    // Send results back to content script
-    await chrome.tabs.sendMessage(tabId, {
-      type: 'INJECT_TRANSLATIONS',
-      translations: msg.batch.map((s, idx) => ({
-        segmentId: s.segmentId,
-        sentenceIndex: s.sentenceIndex,
-        translation: translationMap.get(idx) || '',
-      })),
-    });
-  } catch (error: any) {
-    console.error('[AI Translator] API error:', error);
-    activeTranslations.delete(tabId);
-    await chrome.tabs.sendMessage(tabId, {
-      type: 'TRANSLATION_ERROR',
-      pageId: msg.pageId,
-      error: error.message,
-    });
-  }
+function sendToContent(
+  tabId: number,
+  message: Parameters<typeof chrome.tabs.sendMessage>[1],
+): Promise<unknown> {
+  return chrome.tabs.sendMessage(tabId, message);
 }
 
 function getCacheManager(ttlDays: number): CacheManager {
@@ -320,33 +306,9 @@ function getCacheManager(ttlDays: number): CacheManager {
 /**
  * Test the API connection.
  */
-async function handleTestApiConnection() {
-  const settings = await loadSettings();
-  const apiKey = settings.apiKeys[settings.provider];
-
-  if (!apiKey) {
-    return {
-      type: 'API_TEST_RESPONSE',
-      success: false,
-      message: 'No API key configured.',
-    };
-  }
-
-  try {
-    const provider = createProvider(settings);
-    const valid = await provider.validateApiKey(apiKey);
-    return {
-      type: 'API_TEST_RESPONSE' as const,
-      success: valid,
-      message: valid ? 'Connection successful!' : 'Invalid API key or connection failed.',
-    };
-  } catch (error: any) {
-    return {
-      type: 'API_TEST_RESPONSE' as const,
-      success: false,
-      message: `Connection failed: ${error.message}`,
-    };
-  }
+async function handleTestApiConnection(msg: TestApiConnectionMessage) {
+  const result = await testProviderConnection(msg.profile);
+  return { type: 'API_TEST_RESPONSE' as const, ...result };
 }
 
 /**
@@ -354,77 +316,8 @@ async function handleTestApiConnection() {
  * Works with OpenAI-compatible /models endpoint.
  */
 async function handleFetchModels(msg: FetchModelsMessage) {
-  const { provider, apiKey, endpoint } = msg;
-
-  if (!apiKey) {
-    return {
-      type: 'FETCH_MODELS_RESPONSE' as const,
-      success: false,
-      models: [],
-      error: '请先输入 API 密钥',
-    };
-  }
-
-  if (!endpoint) {
-    return {
-      type: 'FETCH_MODELS_RESPONSE' as const,
-      success: false,
-      models: [],
-      error: '请先配置端点地址',
-    };
-  }
-
   try {
-    const baseUrl = endpoint.replace(/\/+$/, '');
-    const url = provider === 'anthropic'
-      ? null // Anthropic doesn't have a public models endpoint
-      : `${baseUrl}/models`;
-
-    if (!url) {
-      return {
-        type: 'FETCH_MODELS_RESPONSE' as const,
-        success: false,
-        models: [],
-        error: 'Anthropic 不支持自动获取模型列表，请手动输入模型名',
-      };
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      // Try with api-key header for some providers
-      const response2 = await fetch(url, {
-        headers: {
-          'api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-      });
-      if (!response2.ok) {
-        throw new Error(`HTTP ${response2.status}`);
-      }
-      const data2 = await response2.json() as any;
-      const models2 = (data2.data || [])
-        .map((m: any) => m.id)
-        .filter(Boolean)
-        .sort();
-      return {
-        type: 'FETCH_MODELS_RESPONSE' as const,
-        success: true,
-        models: models2,
-      };
-    }
-
-    const data = await response.json() as any;
-    const models = (data.data || [])
-      .map((m: any) => m.id)
-      .filter(Boolean)
-      .sort();
-
+    const models = await fetchProviderModels(msg.profile);
     return {
       type: 'FETCH_MODELS_RESPONSE' as const,
       success: true,
@@ -438,4 +331,79 @@ async function handleFetchModels(msg: FetchModelsMessage) {
       error: `获取模型列表失败: ${error.message}`,
     };
   }
+}
+
+async function handleTranslateText(msg: TranslateTextMessage) {
+  try {
+    const snapshot = createTranslationRunSnapshot(await loadSettings());
+    const translation = await translateManualText(
+      {
+        text: msg.text,
+        sourceLang: msg.sourceLang,
+        targetLang: msg.targetLang,
+      },
+      createCachedTranslationService(snapshot),
+    );
+    return {
+      type: 'TRANSLATE_TEXT_RESPONSE' as const,
+      success: true,
+      translation,
+    };
+  } catch (error) {
+    return {
+      type: 'TRANSLATE_TEXT_RESPONSE' as const,
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function handleTranslateSelection(msg: TranslateSelectionMessage) {
+  try {
+    const settings = await loadSettings();
+    const snapshot = createTranslationRunSnapshot(settings);
+    const translation = await translateManualText(
+      {
+        text: msg.text,
+        sourceLang: settings.sourceLang,
+        targetLang: settings.targetLang,
+        context: msg.context,
+        segmentId: 'selection',
+      },
+      createCachedTranslationService(snapshot),
+    );
+    return {
+      type: 'TRANSLATE_SELECTION_RESPONSE' as const,
+      success: true,
+      translation,
+    };
+  } catch (error) {
+    return {
+      type: 'TRANSLATE_SELECTION_RESPONSE' as const,
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function triggerSelectionTranslation(
+  tabId: number,
+  selectionText?: string,
+): Promise<void> {
+  await chrome.tabs.sendMessage(tabId, {
+    type: 'TRIGGER_SELECTION_TRANSLATION',
+    selectionText,
+  });
+}
+
+function createCachedTranslationService(
+  snapshot: TranslationRunSnapshot,
+): CachedTranslationService {
+  return new CachedTranslationService(snapshot, {
+    provider: createProvider(snapshot.provider),
+    cache: getCacheManager(snapshot.settings.cacheTTLDays),
+    limiter: new RateLimiter({
+      maxConcurrent: snapshot.settings.maxConcurrentCalls,
+    }),
+  });
 }

@@ -1,215 +1,219 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import type { Settings } from '../../shared/types';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { DisplayMode, Settings } from '../../shared/types';
 import { DEFAULT_SETTINGS, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
 import ApiConfig from './components/ApiConfig';
 
-const SETTINGS_KEY = 'ai_translator_settings';
 const APP_ICON_URL = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
 
 const App: React.FC = () => {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  // 直接从 chrome.storage.local 加载
   useEffect(() => {
-    chrome.storage.local.get(SETTINGS_KEY).then((result) => {
-      if (result[SETTINGS_KEY]) {
-        setSettings({ ...DEFAULT_SETTINGS, ...result[SETTINGS_KEY] });
-      }
-      setLoaded(true);
-    }).catch(() => {
-      setLoaded(true);
-    });
+    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' })
+      .then((response) => {
+        if (response?.settings) setSettings(response.settings as Settings);
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, []);
 
-  // 直接保存到 chrome.storage.local
-  const saveSettings = useCallback(async (updated: Settings) => {
-    setSettings(updated);
+  const savePartial = useCallback(async (partial: Partial<Settings>) => {
     try {
-      await chrome.storage.local.set({ [SETTINGS_KEY]: updated });
-      setSaveMsg('✓ 已保存');
-      setTimeout(() => setSaveMsg(null), 2000);
-    } catch (err: any) {
-      setSaveMsg('✗ 保存失败: ' + err.message);
-      setTimeout(() => setSaveMsg(null), 3000);
+      const response = await chrome.runtime.sendMessage({
+        type: 'UPDATE_SETTINGS',
+        settings: partial,
+      });
+      if (!response?.settings) throw new Error('设置保存响应无效');
+      const updated = response.settings as Settings;
+      setSettings(updated);
+      setSaveMessage('已保存');
+      window.setTimeout(() => setSaveMessage(null), 1800);
+      return updated;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSaveMessage(`保存失败：${message}`);
+      window.setTimeout(() => setSaveMessage(null), 3000);
+      throw error;
     }
   }, []);
 
   if (!loaded) {
-    return (
-      <div className="app-container" style={{ textAlign: 'center', paddingTop: '80px', color: '#6b7280' }}>
-        加载中...
-      </div>
-    );
+    return <div className="loading-state">加载中...</div>;
   }
 
   return (
-    <div className="app-container">
-      <div className="app-header">
-        <h1 className="app-title">
-          <img className="app-logo" src={APP_ICON_URL} alt="" /> 网页翻译设置
-        </h1>
-        <p className="app-subtitle">配置大模型 API 连接和翻译偏好。</p>
-        {saveMsg && (
-          <span style={{
-            marginLeft: '12px', fontSize: '13px',
-            color: saveMsg.startsWith('✓') ? '#059669' : '#dc2626',
-          }}>
-            {saveMsg}
-          </span>
+    <main className="app-container">
+      <header className="app-header">
+        <div className="app-heading">
+          <img className="app-logo" src={APP_ICON_URL} alt="" />
+          <div>
+            <h1 className="app-title">网页翻译设置</h1>
+            <p className="app-subtitle">API 与翻译偏好</p>
+          </div>
+        </div>
+        {saveMessage && (
+          <div className={saveMessage === '已保存' ? 'save-status success' : 'save-status error'}>
+            {saveMessage}
+          </div>
         )}
-      </div>
+      </header>
 
-      {/* API 配置 + 翻译设置 + 高级设置，每个区域独立保存 */}
-      <ApiConfig settings={settings} onSave={saveSettings} />
+      <ApiConfig settings={settings} onSave={savePartial} />
+      <TranslationSettings settings={settings} onSave={savePartial} />
+      <PromptSettings settings={settings} onSave={savePartial} />
+      <AdvancedSettings settings={settings} onSave={savePartial} />
 
-      <TranslationSettings settings={settings} onSave={saveSettings} />
-      <PromptSettings settings={settings} onSave={saveSettings} />
-      <AdvancedSettings settings={settings} onSave={saveSettings} />
-
-      <div className="app-footer">
-        网页翻译 v1.0.0 · API 密钥仅存储在本地浏览器中
-      </div>
-    </div>
+      <footer className="app-footer">网页翻译 v1.0.0</footer>
+    </main>
   );
 };
 
-// ---- 提示词设置 ----
-const PromptSettings: React.FC<{
+interface SectionProps {
   settings: Settings;
-  onSave: (s: Settings) => void;
-}> = ({ settings, onSave }) => {
-  const [local, setLocal] = useState(settings);
-  useEffect(() => setLocal(settings), [settings]);
+  onSave: (partial: Partial<Settings>) => Promise<Settings>;
+}
 
-  const promptTemplate = local.customPromptTemplate ?? DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+const PromptSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
+  const [prompt, setPrompt] = useState(settings.customPromptTemplate);
+  useEffect(() => setPrompt(settings.customPromptTemplate), [settings.customPromptTemplate]);
 
   return (
-    <div className="section">
+    <section className="section">
       <div className="section-header">
-        <h2 className="section-title">提示词设置</h2>
+        <h2 className="section-title">提示词</h2>
         <div className="section-actions">
-          <button
-            className="secondary-btn"
-            onClick={() => setLocal({ ...local, customPromptTemplate: DEFAULT_SYSTEM_PROMPT_TEMPLATE })}
-          >
+          <button className="secondary-btn" onClick={() => setPrompt(DEFAULT_SYSTEM_PROMPT_TEMPLATE)}>
             恢复默认
           </button>
-          <button className="save-btn" onClick={() => onSave(local)}>保存</button>
+          <button className="save-btn" onClick={() => void onSave({ customPromptTemplate: prompt })}>
+            保存
+          </button>
         </div>
       </div>
-
-      <div className="form-group">
-        <label className="form-label">系统提示词模板</label>
-        <textarea
-          value={promptTemplate}
-          onChange={e => setLocal({ ...local, customPromptTemplate: e.target.value })}
-          className="form-textarea"
-          rows={11}
-          spellCheck={false}
-        />
-        <p className="form-hint">
-          占位符：{'{{sourceLanguage}}'}、{'{{targetLanguage}}'}。空内容按默认提示词执行。
-        </p>
-      </div>
-    </div>
+      <textarea
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        className="form-textarea"
+        rows={11}
+        spellCheck={false}
+        aria-label="系统提示词模板"
+      />
+    </section>
   );
 };
 
-// ---- 翻译设置 ----
-const TranslationSettings: React.FC<{
-  settings: Settings;
-  onSave: (s: Settings) => void;
-}> = ({ settings, onSave }) => {
-  const [local, setLocal] = useState(settings);
-  useEffect(() => setLocal(settings), [settings]);
+const TranslationSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
+  const [targetLang, setTargetLang] = useState(settings.targetLang);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(settings.displayMode);
+  const [contextWindowSize, setContextWindowSize] = useState(settings.contextWindowSize);
+  const [batchSize, setBatchSize] = useState(settings.batchSize);
+
+  useEffect(() => setTargetLang(settings.targetLang), [settings.targetLang]);
+  useEffect(() => setDisplayMode(settings.displayMode), [settings.displayMode]);
+  useEffect(() => setContextWindowSize(settings.contextWindowSize), [settings.contextWindowSize]);
+  useEffect(() => setBatchSize(settings.batchSize), [settings.batchSize]);
+
+  const save = () => onSave({
+    targetLang,
+    displayMode,
+    contextWindowSize,
+    batchSize,
+  });
 
   return (
-    <div className="section">
+    <section className="section">
       <div className="section-header">
-        <h2 className="section-title">翻译设置</h2>
-        <button className="save-btn" onClick={() => onSave(local)}>保存</button>
+        <h2 className="section-title">翻译</h2>
+        <button className="save-btn" onClick={() => void save()}>保存</button>
       </div>
-
-      <div className="form-group">
-        <label className="form-label">默认目标语言</label>
-        <select value={local.targetLang} onChange={e => setLocal({ ...local, targetLang: e.target.value })} className="form-select">
-          <option value="zh-CN">中文(简体)</option><option value="zh-TW">中文(繁體)</option>
-          <option value="en">English</option><option value="ja">日本語</option>
-          <option value="ko">한국어</option>
-          <option value="fr">Français</option><option value="de">Deutsch</option>
-          <option value="es">Español</option>
-        </select>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">默认显示模式</label>
-        <select value={local.displayMode} onChange={e => setLocal({ ...local, displayMode: e.target.value as any })} className="form-select">
-          <option value="bilingual">对照翻译（原文+译文）</option>
-          <option value="replace">仅显示翻译</option>
-        </select>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">上下文窗口大小（前后句子数）</label>
-        <input type="number" min={0} max={10} value={local.contextWindowSize}
-          onChange={e => setLocal({ ...local, contextWindowSize: parseInt(e.target.value) || 3 })} className="form-input" />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">批量大小（每次 API 调用的句子数）</label>
-        <input type="number" min={1} max={20} value={local.batchSize}
-          onChange={e => setLocal({ ...local, batchSize: parseInt(e.target.value) || 5 })} className="form-input" />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">翻译文字颜色</label>
-        <div className="color-input">
-          <input type="color" value={local.translationColor}
-            onChange={e => setLocal({ ...local, translationColor: e.target.value })} />
-          <span style={{ fontSize: '14px', color: '#6b7280' }}>{local.translationColor}</span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ---- 高级设置 ----
-const AdvancedSettings: React.FC<{
-  settings: Settings;
-  onSave: (s: Settings) => void;
-}> = ({ settings, onSave }) => {
-  const [local, setLocal] = useState(settings);
-  useEffect(() => setLocal(settings), [settings]);
-
-  return (
-    <div className="section">
-      <div className="section-header">
-        <h2 className="section-title">高级设置</h2>
-        <button className="save-btn" onClick={() => onSave(local)}>保存</button>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">缓存有效期（天）</label>
-        <input type="number" min={1} max={365} value={local.cacheTTLDays}
-          onChange={e => setLocal({ ...local, cacheTTLDays: parseInt(e.target.value) || 30 })} className="form-input" />
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">最大并发 API 调用数</label>
-        <input type="number" min={1} max={10} value={local.maxConcurrentCalls}
-          onChange={e => setLocal({ ...local, maxConcurrentCalls: parseInt(e.target.value) || 3 })} className="form-input" />
-      </div>
-
-      <div className="form-checkbox">
-        <input type="checkbox" id="mutationObserver" checked={local.enableMutationObserver}
-          onChange={e => setLocal({ ...local, enableMutationObserver: e.target.checked })} />
-        <label htmlFor="mutationObserver" className="form-label" style={{ marginBottom: 0 }}>
-          自动翻译动态加载的内容
+      <div className="settings-grid">
+        <label className="form-group">
+          <span className="form-label">默认目标语言</span>
+          <select value={targetLang} onChange={(event) => setTargetLang(event.target.value)} className="form-select">
+            <option value="zh-CN">中文（简体）</option>
+            <option value="zh-TW">中文（繁體）</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="ko">한국어</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="es">Español</option>
+          </select>
+        </label>
+        <label className="form-group">
+          <span className="form-label">默认显示模式</span>
+          <select value={displayMode} onChange={(event) => setDisplayMode(event.target.value as DisplayMode)} className="form-select">
+            <option value="bilingual">原文 + 译文</option>
+            <option value="replace">仅译文</option>
+          </select>
+        </label>
+        <label className="form-group">
+          <span className="form-label">上下文窗口</span>
+          <input type="number" min={0} max={10} value={contextWindowSize}
+            onChange={(event) => setContextWindowSize(Number(event.target.value))} className="form-input" />
+        </label>
+        <label className="form-group">
+          <span className="form-label">每批句子数</span>
+          <input type="number" min={1} max={20} value={batchSize}
+            onChange={(event) => setBatchSize(Number(event.target.value))} className="form-input" />
         </label>
       </div>
-    </div>
+    </section>
+  );
+};
+
+const AdvancedSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
+  const [cacheTTLDays, setCacheTTLDays] = useState(settings.cacheTTLDays);
+  const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(settings.maxConcurrentCalls);
+  const [enableMutationObserver, setEnableMutationObserver] = useState(settings.enableMutationObserver);
+  const [showSelectionTranslateButton, setShowSelectionTranslateButton] = useState(
+    settings.showSelectionTranslateButton,
+  );
+
+  useEffect(() => setCacheTTLDays(settings.cacheTTLDays), [settings.cacheTTLDays]);
+  useEffect(() => setMaxConcurrentCalls(settings.maxConcurrentCalls), [settings.maxConcurrentCalls]);
+  useEffect(() => setEnableMutationObserver(settings.enableMutationObserver), [settings.enableMutationObserver]);
+  useEffect(() => setShowSelectionTranslateButton(settings.showSelectionTranslateButton), [settings.showSelectionTranslateButton]);
+
+  return (
+    <section className="section">
+      <div className="section-header">
+        <h2 className="section-title">高级</h2>
+        <button className="save-btn" onClick={() => void onSave({
+          cacheTTLDays,
+          maxConcurrentCalls,
+          enableMutationObserver,
+          showSelectionTranslateButton,
+        })}>保存</button>
+      </div>
+      <div className="settings-grid">
+        <label className="form-group">
+          <span className="form-label">缓存天数</span>
+          <input type="number" min={1} max={365} value={cacheTTLDays}
+            onChange={(event) => setCacheTTLDays(Number(event.target.value))} className="form-input" />
+        </label>
+        <label className="form-group">
+          <span className="form-label">最大并发调用</span>
+          <input type="number" min={1} max={10} value={maxConcurrentCalls}
+            onChange={(event) => setMaxConcurrentCalls(Number(event.target.value))} className="form-input" />
+        </label>
+      </div>
+      <label className="form-checkbox">
+        <input type="checkbox" checked={enableMutationObserver}
+          onChange={(event) => setEnableMutationObserver(event.target.checked)} />
+        <span>自动翻译动态新增内容</span>
+      </label>
+      <label className="form-checkbox checkbox-with-note">
+        <input type="checkbox" checked={showSelectionTranslateButton}
+          onChange={(event) => setShowSelectionTranslateButton(event.target.checked)} />
+        <span>
+          划词后显示翻译按钮
+          <small>关闭后仍可使用 Alt+Shift+T 或右键菜单翻译所选文本</small>
+        </span>
+      </label>
+    </section>
   );
 };
 

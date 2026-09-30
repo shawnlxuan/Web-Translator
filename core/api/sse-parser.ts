@@ -21,7 +21,10 @@ export async function* parseOpenAISSEStream(
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
@@ -29,26 +32,14 @@ export async function* parseOpenAISSEStream(
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data: ')) continue;
-
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') return;
-
-        try {
-          const parsed = JSON.parse(data);
-          const choice = parsed.choices?.[0];
-          if (choice) {
-            yield {
-              content: choice.delta?.content || '',
-              finishReason: choice.finish_reason || null,
-            };
-          }
-        } catch {
-          // Skip malformed JSON (partial chunks, etc.)
-        }
+        const event = parseOpenAILine(line);
+        if (event === 'done') return;
+        if (event) yield event;
       }
     }
+
+    const event = parseOpenAILine(buffer);
+    if (event !== 'done' && event) yield event;
   } finally {
     reader.releaseLock();
   }
@@ -76,40 +67,101 @@ export async function* parseAnthropicSSEStream(
   try {
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        buffer += decoder.decode();
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        // Anthropic SSE uses "event:" and "data:" lines
-        if (!trimmed.startsWith('data: ')) continue;
-
-        const data = trimmed.slice(6);
-        try {
-          const parsed = JSON.parse(data);
-
-          switch (parsed.type) {
-            case 'content_block_delta':
-              if (parsed.delta?.type === 'text_delta') {
-                yield {
-                  content: parsed.delta.text || '',
-                  finished: false,
-                };
-              }
-              break;
-            case 'message_stop':
-              yield { content: '', finished: true };
-              return;
-          }
-        } catch {
-          // Skip malformed JSON
+        const event = parseAnthropicLine(line);
+        if (event === 'done') {
+          yield { content: '', finished: true };
+          return;
         }
+        if (event) yield event;
       }
+    }
+
+    const event = parseAnthropicLine(buffer);
+    if (event === 'done') {
+      yield { content: '', finished: true };
+    } else if (event) {
+      yield event;
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+export class SSEStreamError extends Error {
+  readonly statusCode = 0;
+
+  constructor(details: unknown) {
+    super(`流式响应返回错误：${formatStreamError(details)}`);
+    this.name = 'SSEStreamError';
+  }
+}
+
+function parseOpenAILine(
+  line: string,
+): { content: string; finishReason: string | null } | 'done' | null {
+  const data = getSseData(line);
+  if (data === null) return null;
+  if (data === '[DONE]') return 'done';
+
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed?.error) throw new SSEStreamError(parsed.error);
+    const choice = parsed?.choices?.[0];
+    if (!choice) return null;
+    return {
+      content: choice.delta?.content || '',
+      finishReason: choice.finish_reason || null,
+    };
+  } catch (error) {
+    if (error instanceof SSEStreamError) throw error;
+    return null;
+  }
+}
+
+function parseAnthropicLine(
+  line: string,
+): { content: string; finished: boolean } | 'done' | null {
+  const data = getSseData(line);
+  if (data === null) return null;
+
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed?.type === 'error' || parsed?.error) {
+      throw new SSEStreamError(parsed.error ?? parsed);
+    }
+    if (parsed?.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+      return {
+        content: parsed.delta.text || '',
+        finished: false,
+      };
+    }
+    return parsed?.type === 'message_stop' ? 'done' : null;
+  } catch (error) {
+    if (error instanceof SSEStreamError) throw error;
+    return null;
+  }
+}
+
+function getSseData(line: string): string | null {
+  const match = line.trim().match(/^data:\s?(.*)$/);
+  return match ? match[1].trim() : null;
+}
+
+function formatStreamError(details: unknown): string {
+  if (typeof details === 'string') return details.slice(0, 500);
+  try {
+    return JSON.stringify(details).slice(0, 500);
+  } catch {
+    return String(details).slice(0, 500);
   }
 }

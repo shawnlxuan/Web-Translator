@@ -5,7 +5,10 @@
 import type { SegmentContext } from '../../shared/types';
 import { MemoryCache } from './memory-cache';
 import { StorageCache } from './storage-cache';
-import { computeCacheKey } from './cache-key';
+import {
+  computeCacheKey,
+  type ProviderCacheIdentity,
+} from './cache-key';
 import { MEMORY_CACHE_MAX_SIZE } from '../../shared/constants';
 
 export interface CacheManagerConfig {
@@ -45,6 +48,7 @@ export class CacheManager {
     sourceLang: string,
     targetLang: string,
     context: Pick<SegmentContext, 'headingPath' | 'textType' | 'tagName'>,
+    provider: ProviderCacheIdentity,
     customPromptTemplate?: string,
   ): Promise<string | null> {
     const key = await computeCacheKey(
@@ -52,6 +56,7 @@ export class CacheManager {
       sourceLang,
       targetLang,
       context,
+      provider,
       customPromptTemplate,
     );
 
@@ -80,6 +85,7 @@ export class CacheManager {
     sourceLang: string,
     targetLang: string,
     context: Pick<SegmentContext, 'headingPath' | 'textType' | 'tagName'>,
+    provider: ProviderCacheIdentity,
     translation: string,
     customPromptTemplate?: string,
   ): Promise<void> {
@@ -88,14 +94,14 @@ export class CacheManager {
       sourceLang,
       targetLang,
       context,
+      provider,
       customPromptTemplate,
     );
 
-    // Store in memory (fire and forget for storage)
+    // Store in memory first, then wait for persistent storage to settle.
     this.memoryCache.set(key, translation);
 
-    // Store in persistent storage (async, don't wait)
-    this.storageCache.set(key, translation).catch((err) => {
+    await this.storageCache.set(key, translation).catch((err) => {
       console.warn('[CacheManager] Failed to store in persistent cache:', err);
     });
   }
@@ -143,6 +149,7 @@ export class CacheManager {
     }>,
     sourceLang: string,
     targetLang: string,
+    provider: ProviderCacheIdentity,
     customPromptTemplate?: string,
   ): Promise<Map<string, string>> {
     const results = new Map<string, string>();
@@ -153,6 +160,7 @@ export class CacheManager {
         sourceLang,
         targetLang,
         s.context,
+        provider,
         customPromptTemplate,
       );
       if (translation !== null) {

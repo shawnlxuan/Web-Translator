@@ -2,10 +2,48 @@
 // Core domain types for the AI Translator extension
 // ============================================================
 
-/** Supported LLM provider types */
-export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'glm' | 'mimo' | 'custom';
+/** Official provider preset identifiers. */
+export type BuiltinProviderType =
+  | 'openai'
+  | 'anthropic'
+  | 'deepseek'
+  | 'glm'
+  | 'qwen'
+  | 'kimi'
+  | 'mimo'
+  | 'minimax';
 
-export type ProviderStringMap = Record<ProviderType, string>;
+export type BuiltinProviderId = `builtin:${BuiltinProviderType}`;
+export type CustomProviderId = `custom:${string}`;
+export type ProviderId = BuiltinProviderId | CustomProviderId;
+export type ProviderKind = 'builtin' | 'custom';
+export type ProviderProtocol = 'openai-compatible' | 'anthropic';
+
+/** Kept for provider-level APIs that use a provider slug rather than a profile id. */
+export type ProviderType = BuiltinProviderType | 'custom';
+
+export type ProviderStringMap = Partial<Record<ProviderType, string>>;
+
+export interface ProviderPreset {
+  id: BuiltinProviderType;
+  name: string;
+  protocol: ProviderProtocol;
+  endpoint: string;
+  model: string;
+  docsUrl: string;
+  verifiedAt: string;
+}
+
+export interface ProviderProfile {
+  id: ProviderId;
+  kind: ProviderKind;
+  name: string;
+  protocol: ProviderProtocol;
+  apiKey: string;
+  endpoint: string;
+  model: string;
+  preset?: BuiltinProviderType;
+}
 
 /** Display mode for translations */
 export type DisplayMode = 'bilingual' | 'replace';
@@ -127,10 +165,9 @@ export interface ProviderConfig {
 
 /** Full extension settings */
 export interface Settings {
-  provider: ProviderType;
-  apiKeys: ProviderStringMap;
-  models: ProviderStringMap;
-  customEndpoints: ProviderStringMap;
+  settingsVersion: 2;
+  activeProviderId: ProviderId;
+  providerProfiles: ProviderProfile[];
   sourceLang: string;       // 'auto' or specific language code
   targetLang: string;
   displayMode: DisplayMode;
@@ -139,8 +176,8 @@ export interface Settings {
   cacheTTLDays: number;      // Days to keep cached translations
   maxConcurrentCalls: number;
   translationColor: string;
-  bilingualStyle: 'inline' | 'block';
   enableMutationObserver: boolean;
+  showSelectionTranslateButton: boolean;
   customPromptTemplate: string;
 }
 

@@ -1,272 +1,361 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { SUPPORTED_LANGUAGES, DEFAULT_SETTINGS } from '../../shared/constants';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_SETTINGS, SUPPORTED_LANGUAGES } from '../../shared/constants';
 import { TranslationState } from '../../shared/types';
-import type { Settings, DisplayMode, ProviderType, ProviderStringMap } from '../../shared/types';
+import type { DisplayMode, ProviderId, Settings } from '../../shared/types';
+import { resolveActiveProvider } from '../../shared/provider-presets';
 import LanguageSelector from './components/LanguageSelector';
 import ModeToggle from './components/ModeToggle';
 import TranslateButton from './components/TranslateButton';
+import {
+  ensureContentScript,
+  groupProviderProfiles,
+  isProviderReady,
+  truncateToCodePoints,
+} from './popup-utils';
 
-const SETTINGS_KEY = 'ai_translator_settings';
 const APP_ICON_URL = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
+const MANUAL_LIMIT = 2000;
 
-const PROVIDERS: Array<{ value: ProviderType; label: string }> = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'glm', label: '智谱 GLM' },
-  { value: 'mimo', label: 'MiniMax' },
-  { value: 'custom', label: '自定义' },
-];
+type PopupTab = 'page' | 'text';
 
 const App: React.FC = () => {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [sourceLang, setSourceLang] = useState('auto');
-  const [targetLang, setTargetLang] = useState('zh-CN');
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('bilingual');
-  const [translationState, setTranslationState] = useState<TranslationState>(TranslationState.IDLE);
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [progress, setProgress] = useState({ total: 0, translated: 0 });
-  const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [activeTab, setActiveTab] = useState<PopupTab>('page');
+  const [sourceLang, setSourceLang] = useState(DEFAULT_SETTINGS.sourceLang);
+  const [targetLang, setTargetLang] = useState(DEFAULT_SETTINGS.targetLang);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_SETTINGS.displayMode);
 
-  // 初始化：加载设置 + 查询翻译状态
-  useEffect(() => {
-    chrome.storage.local.get(SETTINGS_KEY).then((result) => {
-      if (result[SETTINGS_KEY]) {
-        const s = normalizeSettings(result[SETTINGS_KEY] as Partial<Settings>);
-        setSettings(s);
-        setSourceLang(s.sourceLang);
-        setTargetLang(s.targetLang);
-        setDisplayMode(s.displayMode);
-      }
-    }).catch(() => {});
+  const [pageState, setPageState] = useState<TranslationState>(TranslationState.IDLE);
+  const [pageProgress, setPageProgress] = useState({ total: 0, translated: 0 });
+  const [pageError, setPageError] = useState<string | null>(null);
+  const pollRef = useRef<number | null>(null);
 
-    queryTranslationState();
+  const [manualText, setManualText] = useState('');
+  const [manualResult, setManualResult] = useState('');
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualLoading, setManualLoading] = useState(false);
+  const [copyLabel, setCopyLabel] = useState('复制');
+
+  const activeProvider = useMemo(() => resolveActiveProvider(settings), [settings]);
+  const providerReady = isProviderReady(activeProvider);
+  const providerGroups = useMemo(
+    () => groupProviderProfiles(settings.providerProfiles),
+    [settings.providerProfiles],
+  );
+  const pageBusy = pageState === TranslationState.EXTRACTING
+    || pageState === TranslationState.TRANSLATING;
+  const pageComplete = pageState === TranslationState.COMPLETE;
+
+  const updateSettings = useCallback(async (partial: Partial<Settings>) => {
+    const response = await chrome.runtime.sendMessage({
+      type: 'UPDATE_SETTINGS',
+      settings: partial,
+    });
+    if (!response?.settings) throw new Error('设置更新失败');
+    const updated = response.settings as Settings;
+    setSettings(updated);
+    return updated;
   }, []);
 
-  // 翻译中时每秒轮询进度
-  useEffect(() => {
-    if (isTranslating) {
-      pollRef.current = setInterval(queryTranslationState, 1000);
-    } else {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    }
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [isTranslating]);
-
-  const queryTranslationState = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-      if (!tabs[0]?.id) return;
-      chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_TRANSLATION_STATE' }).then((res) => {
-        if (res) {
-          const active = res.state === 'extracting' || res.state === 'translating';
-          setTranslationState(res.state || TranslationState.IDLE);
-          setIsTranslating(active);
-          setProgress({ total: res.totalSegments || 0, translated: res.translatedSegments || 0 });
-          if (res.state === 'error') setError(res.errorMessage || '翻译出错');
-          if (res.state !== 'error') setError(null);
-          if (res.state === 'idle' || res.state === 'complete') {
-            setIsTranslating(false);
-          }
-        }
-      }).catch(() => {});
-    }).catch(() => {});
-  };
-
-  const ensureContentScript = async (tabId: number): Promise<boolean> => {
+  const queryPageState = useCallback(async () => {
     try {
-      await chrome.tabs.sendMessage(tabId, { type: 'GET_TRANSLATION_STATE' });
-      return true;
+      const response = await chrome.runtime.sendMessage({ type: 'GET_TRANSLATION_STATE' });
+      if (!response) return;
+      const nextState = response.state || TranslationState.IDLE;
+      setPageState(nextState);
+      setPageProgress({
+        total: response.totalSegments || 0,
+        translated: response.translatedSegments || 0,
+      });
+      setPageError(nextState === TranslationState.ERROR
+        ? response.errorMessage || '翻译出错'
+        : null);
     } catch {
-      try {
-        await chrome.scripting.insertCSS({
-          target: { tabId },
-          files: ['content-scripts/content.css'],
-        }).catch(() => {}); // CSS optional
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          files: ['content-scripts/content.js'],
-        });
-        await new Promise(r => setTimeout(r, 200));
-        return true;
-      } catch (err: any) {
-        setError('注入失败: ' + (err.message || String(err)));
-        return false;
+      // Restricted browser pages may not have a content script.
+    }
+  }, []);
+
+  useEffect(() => {
+    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' })
+      .then((response) => {
+        if (!response?.settings) return;
+        const next = response.settings as Settings;
+        setSettings(next);
+        setSourceLang(next.sourceLang);
+        setTargetLang(next.targetLang);
+        setDisplayMode(next.displayMode);
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+    void queryPageState();
+  }, [queryPageState]);
+
+  useEffect(() => {
+    if (pageBusy) {
+      pollRef.current = window.setInterval(() => void queryPageState(), 800);
+    } else if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    return () => {
+      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+    };
+  }, [pageBusy, queryPageState]);
+
+  const selectProvider = async (id: ProviderId) => {
+    setPageError(null);
+    setManualError(null);
+    try {
+      await updateSettings({ activeProviderId: id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (activeTab === 'page') {
+        setPageError(message);
+      } else {
+        setManualError(message);
       }
     }
   };
 
-  const handleTranslate = useCallback(() => {
-    setError(null);
-    if (isTranslating || translationState === TranslationState.COMPLETE) {
-      chrome.runtime.sendMessage({ type: 'STOP_TRANSLATION' }, () => {
-        if (chrome.runtime.lastError) {
-          setError('取消翻译失败: ' + chrome.runtime.lastError.message);
-          return;
-        }
-        setTranslationState(TranslationState.IDLE);
-        setIsTranslating(false);
-        setProgress({ total: 0, translated: 0 });
-      });
-      setIsTranslating(false);
-    } else {
-      chrome.tabs.query({ active: true, currentWindow: true }).then(async (tabs) => {
-        if (!tabs[0]?.id) {
-          setError('无法获取当前标签页');
-          return;
-        }
-        const ok = await ensureContentScript(tabs[0].id);
-        if (!ok) return;
+  const changeSourceLanguage = (value: string) => {
+    setSourceLang(value);
+    void updateSettings({ sourceLang: value }).catch(() => {});
+  };
 
-        chrome.runtime.sendMessage({
-          type: 'START_TRANSLATION',
-          sourceLang,
-          targetLang,
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            setError('启动翻译失败: ' + chrome.runtime.lastError.message);
-            return;
-          }
-          if (response?.type === 'TRANSLATION_ERROR') {
-            setError('启动失败: ' + response.error);
-            return;
-          }
-          setTranslationState(TranslationState.TRANSLATING);
-          setIsTranslating(true);
-        });
-      });
-    }
-  }, [isTranslating, sourceLang, targetLang, translationState]);
+  const changeTargetLanguage = (value: string) => {
+    setTargetLang(value);
+    void updateSettings({ targetLang: value }).catch(() => {});
+  };
 
-  const handleToggleMode = useCallback((mode: DisplayMode) => {
+  const toggleMode = async (mode: DisplayMode) => {
     setDisplayMode(mode);
-    const updated = { ...settings, displayMode: mode };
-    setSettings(updated);
-    chrome.storage.local.set({ [SETTINGS_KEY]: updated }).catch(() => {});
-    chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'TOGGLE_DISPLAY_MODE', displayMode: mode }).catch(() => {});
+    setPageError(null);
+    try {
+      await updateSettings({ displayMode: mode });
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]?.id != null) {
+        await chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'TOGGLE_DISPLAY_MODE',
+          displayMode: mode,
+        }).catch(() => {});
       }
-    });
-  }, [settings]);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
-  const handleProviderChange = useCallback((provider: ProviderType) => {
-    const updated = { ...settings, provider };
-    setSettings(updated);
-    chrome.storage.local.set({ [SETTINGS_KEY]: updated }).catch((err) => {
-      setError('切换 API 提供商失败: ' + (err.message || String(err)));
-    });
-  }, [settings]);
+  const togglePageTranslation = async () => {
+    setPageError(null);
+    if (pageBusy || pageComplete) {
+      try {
+        await chrome.runtime.sendMessage({ type: 'STOP_TRANSLATION' });
+        setPageState(TranslationState.IDLE);
+        setPageProgress({ total: 0, translated: 0 });
+      } catch (error) {
+        setPageError(`取消翻译失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
 
-  const hasApiKey = Boolean(settings.apiKeys[settings.provider]?.trim());
-  const isTranslated = translationState === TranslationState.COMPLETE;
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tabId = tabs[0]?.id;
+      if (tabId == null) throw new Error('无法获取当前标签页');
+      try {
+        await ensureContentScript(tabId);
+      } catch (error) {
+        throw new Error(
+          `无法在当前页面运行：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const response = await chrome.runtime.sendMessage({
+        type: 'START_TRANSLATION',
+        sourceLang,
+        targetLang,
+      });
+      if (response?.type === 'TRANSLATION_ERROR') throw new Error(response.error);
+      setPageState(TranslationState.TRANSLATING);
+      void queryPageState();
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : String(error));
+      setPageState(TranslationState.ERROR);
+    }
+  };
+
+  const translateText = async () => {
+    const text = manualText.trim();
+    if (!text) {
+      setManualError('请输入要翻译的文字');
+      return;
+    }
+    setManualLoading(true);
+    setManualError(null);
+    setManualResult('');
+    setCopyLabel('复制');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'TRANSLATE_TEXT',
+        text,
+        sourceLang,
+        targetLang,
+      });
+      if (!response?.success || !response.translation) {
+        throw new Error(response?.error || '翻译失败');
+      }
+      setManualResult(response.translation);
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setManualLoading(false);
+    }
+  };
+
+  const copyResult = async () => {
+    if (!manualResult) return;
+    try {
+      await navigator.clipboard.writeText(manualResult);
+      setCopyLabel('已复制');
+      window.setTimeout(() => setCopyLabel('复制'), 1400);
+    } catch {
+      setManualError('复制失败');
+    }
+  };
+
+  if (!loaded) return <div className="popup-loading">加载中...</div>;
 
   return (
-    <div className="app-container">
-      <div className="app-header">
-        <img className="app-logo" src={APP_ICON_URL} alt="" />
-        <h1 className="app-title">网页翻译</h1>
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <LanguageSelector label="源语言" value={sourceLang} languages={SUPPORTED_LANGUAGES} onChange={setSourceLang} />
-        <div style={{ marginTop: '8px' }}>
-          <LanguageSelector label="目标" value={targetLang} languages={SUPPORTED_LANGUAGES.filter(l => l.code !== 'auto')} onChange={setTargetLang} />
+    <main className="app-container">
+      <header className="app-header">
+        <div className="brand-row">
+          <img className="app-logo" src={APP_ICON_URL} alt="" />
+          <h1 className="app-title">网页翻译</h1>
         </div>
+        <button className="header-settings" onClick={() => chrome.runtime.openOptionsPage()}>
+          设置
+        </button>
+      </header>
+
+      <div className="main-tabs" role="tablist" aria-label="翻译类型">
+        <button role="tab" aria-selected={activeTab === 'page'} className={activeTab === 'page' ? 'active' : ''}
+          onClick={() => setActiveTab('page')}>网页翻译</button>
+        <button role="tab" aria-selected={activeTab === 'text'} className={activeTab === 'text' ? 'active' : ''}
+          onClick={() => setActiveTab('text')}>文本翻译</button>
       </div>
 
-      <div className="provider-panel">
-        <label className="form-label">API 提供商</label>
-        <div className="provider-row">
-          <select
-            value={settings.provider}
-            onChange={(e) => handleProviderChange(e.target.value as ProviderType)}
-            className="form-select provider-select"
-          >
-            {PROVIDERS.map((provider) => (
-              <option key={provider.value} value={provider.value}>
-                {provider.label}
-              </option>
-            ))}
+      <section className="shared-controls">
+        <label className="provider-control">
+          <span>API</span>
+          <select value={settings.activeProviderId}
+            onChange={(event) => void selectProvider(event.target.value as ProviderId)}>
+            <optgroup label="固定提供商">
+              {providerGroups.builtins.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.name}</option>
+              ))}
+            </optgroup>
+            {providerGroups.custom.length > 0 && (
+              <optgroup label="自定义 API">
+                {providerGroups.custom.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.name}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
-          <button className="settings-link-btn" onClick={() => chrome.runtime.openOptionsPage()}>
-            配置
+        </label>
+        <div className="provider-summary">
+          <span title={activeProvider.model}>{activeProvider.model || '未设置模型'}</span>
+          <span className={providerReady ? 'ready' : 'missing'}>{providerReady ? '可用' : '未配置'}</span>
+        </div>
+      </section>
+
+      <div className="language-grid">
+        <LanguageSelector label="源语言" value={sourceLang} languages={SUPPORTED_LANGUAGES} onChange={changeSourceLanguage} />
+        <LanguageSelector label="目标" value={targetLang}
+          languages={SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto')}
+          onChange={changeTargetLanguage} />
+      </div>
+
+      {activeTab === 'page' ? (
+        <section className="tab-panel" role="tabpanel">
+          <ModeToggle value={displayMode} onChange={(mode) => void toggleMode(mode)} />
+          {!providerReady && <ProviderWarning />}
+          {pageError && <div className="error-box" role="alert">{pageError}</div>}
+          <TranslateButton
+            isTranslating={pageBusy}
+            isTranslated={pageComplete}
+            hasApiKey={providerReady}
+            progress={pageProgress}
+            onClick={() => void togglePageTranslation()}
+          />
+          {(pageBusy || pageComplete) && (
+            <Progress progress={pageProgress} complete={pageComplete} />
+          )}
+        </section>
+      ) : (
+        <section className="tab-panel manual-panel" role="tabpanel">
+          <div className="manual-input-wrap">
+            <textarea
+              value={manualText}
+              onChange={(event) => {
+                setManualText(truncateToCodePoints(event.target.value, MANUAL_LIMIT));
+                setManualError(null);
+              }}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                  event.preventDefault();
+                  void translateText();
+                }
+              }}
+              rows={6}
+              placeholder="输入单词或句子"
+              aria-label="要翻译的文字"
+            />
+            <span className="character-count">{Array.from(manualText).length}/{MANUAL_LIMIT}</span>
+          </div>
+          {!providerReady && <ProviderWarning />}
+          {manualError && <div className="error-box" role="alert">{manualError}</div>}
+          <button className="manual-translate-btn" disabled={!providerReady || manualLoading || !manualText.trim()}
+            onClick={() => void translateText()}>
+            {manualLoading ? '翻译中...' : '翻译'}
           </button>
-        </div>
-        <div className="provider-meta">
-          <span>{settings.models[settings.provider] || '未选择模型'}</span>
-          <span className={hasApiKey ? 'provider-ready' : 'provider-missing'}>
-            {hasApiKey ? '已配置密钥' : '未配置密钥'}
-          </span>
-        </div>
+          {manualResult && (
+            <div className="manual-result">
+              <div className="manual-result-header">
+                <span>译文</span>
+                <button onClick={() => void copyResult()}>{copyLabel}</button>
+              </div>
+              <div className="manual-result-text">{manualResult}</div>
+            </div>
+          )}
+        </section>
+      )}
+    </main>
+  );
+};
+
+const ProviderWarning: React.FC = () => (
+  <div className="warning-box">
+    当前 API 未配置完整
+    <button onClick={() => chrome.runtime.openOptionsPage()}>前往设置</button>
+  </div>
+);
+
+const Progress: React.FC<{
+  progress: { total: number; translated: number };
+  complete: boolean;
+}> = ({ progress, complete }) => {
+  const percentage = progress.total > 0
+    ? Math.min(100, (progress.translated / progress.total) * 100)
+    : 8;
+  return (
+    <div className="progress-bar">
+      <div className="progress-label">
+        <span>{complete ? '翻译完成' : '翻译中...'}</span>
+        <span>{progress.total > 0 ? `${progress.translated}/${progress.total}` : ''}</span>
       </div>
-
-      <ModeToggle value={displayMode} onChange={handleToggleMode} />
-
-      {!hasApiKey && (
-        <div className="warning-box">
-          ⚠️ 未配置 API 密钥{' '}
-          <button onClick={() => chrome.runtime.openOptionsPage()}>前往设置</button>
-        </div>
-      )}
-
-      {error && (
-        <div className="warning-box" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
-          ❌ {error}
-        </div>
-      )}
-
-      <TranslateButton
-        isTranslating={isTranslating}
-        isTranslated={isTranslated}
-        hasApiKey={hasApiKey}
-        progress={progress}
-        onClick={handleTranslate}
-      />
-
-      {(isTranslating || isTranslated) && (
-        <div className="progress-bar">
-          <div className="progress-label">
-            <span>{isTranslated ? '翻译完成' : (progress.total > 0 ? `翻译中...` : '准备中...')}</span>
-            <span>{progress.total > 0 ? `${progress.translated}/${progress.total}` : ''}</span>
-          </div>
-          <div className="progress-track">
-            <div className="progress-fill"
-              style={{ width: progress.total > 0 ? `${(progress.translated / progress.total) * 100}%` : '10%' }} />
-          </div>
-        </div>
-      )}
-
-      <div className="app-footer">
-        <span>{getProviderLabel(settings.provider)} · {settings.models[settings.provider]}</span>
-        <button onClick={() => chrome.runtime.openOptionsPage()}>设置</button>
-      </div>
+      <div className="progress-track"><div className="progress-fill" style={{ width: `${percentage}%` }} /></div>
     </div>
   );
 };
 
 export default App;
-
-function normalizeSettings(partial: Partial<Settings>): Settings {
-  return {
-    ...DEFAULT_SETTINGS,
-    ...partial,
-    apiKeys: mergeProviderMap(DEFAULT_SETTINGS.apiKeys, partial.apiKeys),
-    models: mergeProviderMap(DEFAULT_SETTINGS.models, partial.models),
-    customEndpoints: mergeProviderMap(DEFAULT_SETTINGS.customEndpoints, partial.customEndpoints),
-  };
-}
-
-function mergeProviderMap(
-  defaults: ProviderStringMap,
-  partial?: Partial<ProviderStringMap>,
-): ProviderStringMap {
-  return {
-    ...defaults,
-    ...partial,
-  };
-}
-
-function getProviderLabel(provider: ProviderType): string {
-  return PROVIDERS.find((item) => item.value === provider)?.label || provider;
-}

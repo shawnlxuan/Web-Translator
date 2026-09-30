@@ -2,10 +2,12 @@
 // Typed wrapper around chrome.storage for settings persistence
 // ============================================================
 
-import type { Settings } from '../../shared/types';
+import type { ProviderProfile, Settings } from '../../shared/types';
+import { resolveActiveProvider } from '../../shared/provider-presets';
 import { sanitizeSettings } from './defaults';
 
 const SETTINGS_KEY = 'ai_translator_settings';
+let pendingUpdate: Promise<void> = Promise.resolve();
 
 /**
  * Load all settings from chrome.storage.local.
@@ -22,47 +24,47 @@ export async function loadSettings(): Promise<Settings> {
  * Save settings to chrome.storage.local.
  */
 export async function saveSettings(settings: Settings): Promise<void> {
-  await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+  await chrome.storage.local.set({
+    [SETTINGS_KEY]: sanitizeSettings(settings),
+  });
 }
 
 /**
  * Update a partial set of settings (merged with existing).
  */
-export async function updateSettings(partial: Partial<Settings>): Promise<Settings> {
-  const current = await loadSettings();
-  const updated = sanitizeSettings({ ...current, ...partial });
-  await saveSettings(updated);
-  return updated;
+export function updateSettings(partial: Partial<Settings>): Promise<Settings> {
+  const update = pendingUpdate.then(async () => {
+    const current = await loadSettings();
+    const updated = sanitizeSettings({ ...current, ...partial });
+    await saveSettings(updated);
+    return updated;
+  });
+  pendingUpdate = update.then(() => undefined, () => undefined);
+  return update;
 }
 
 /**
  * Get the API key for the currently configured provider.
  */
 export async function getActiveApiKey(): Promise<string | null> {
-  const settings = await loadSettings();
-  const key = settings.apiKeys[settings.provider];
+  const profile = await getActiveProviderProfile();
+  const key = profile.apiKey.trim();
   return key || null;
 }
 
 /**
- * Get the active provider configuration.
+ * Get the active provider profile.
  */
-export async function getActiveProviderConfig(): Promise<{
-  type: string;
-  apiKey: string;
-  model: string;
-  endpoint: string;
-} | null> {
+export async function getActiveProviderProfile(): Promise<ProviderProfile> {
   const settings = await loadSettings();
-  const apiKey = settings.apiKeys[settings.provider];
-  if (!apiKey) return null;
+  return resolveActiveProvider(settings);
+}
 
-  return {
-    type: settings.provider,
-    apiKey,
-    model: settings.models[settings.provider],
-    endpoint: settings.customEndpoints[settings.provider],
-  };
+/**
+ * Backward-compatible name for consumers that treat the profile as config.
+ */
+export async function getActiveProviderConfig(): Promise<ProviderProfile> {
+  return getActiveProviderProfile();
 }
 
 /**

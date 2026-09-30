@@ -3,7 +3,7 @@
   "name": "网页翻译",
   "description": "AI-powered immersive webpage translation extension",
   "version": "1.0.0",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "clipboardWrite", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
@@ -19,6 +19,10 @@
     "toggle-mode": {
       "suggested_key": { "default": "Alt+M" },
       "description": "Toggle display mode (bilingual / replace)"
+    },
+    "translate-selection": {
+      "suggested_key": { "default": "Alt+Shift+T" },
+      "description": "Translate selected text"
     }
   },
   "background": {

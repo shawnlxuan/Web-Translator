@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest';
+import { AnthropicProvider } from '../../../core/api/anthropic-provider';
+import { OpenAIProvider } from '../../../core/api/openai-provider';
+import { createProvider } from '../../../core/api/provider-factory';
+import type { ProviderProfile } from '../../../shared/types';
+
+function createProfile(
+  overrides: Partial<ProviderProfile> = {},
+): ProviderProfile {
+  return {
+    id: 'custom:test',
+    kind: 'custom',
+    name: 'Test Provider',
+    protocol: 'openai-compatible',
+    apiKey: 'test-key',
+    endpoint: 'https://gateway.example.com/v1',
+    model: 'test-model',
+    ...overrides,
+  };
+}
+
+describe('createProvider', () => {
+  it('creates an Anthropic provider from the profile protocol', () => {
+    const provider = createProvider(createProfile({ protocol: 'anthropic' }));
+
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+  });
+
+  it('creates an OpenAI-compatible provider from the profile protocol', () => {
+    const provider = createProvider(createProfile({
+      id: 'builtin:glm',
+      kind: 'builtin',
+      name: 'GLM',
+      preset: 'glm',
+    }));
+
+    expect(provider).toBeInstanceOf(OpenAIProvider);
+  });
+
+  it('rejects an empty API key with the profile name in the error', () => {
+    expect(() => createProvider(createProfile({ apiKey: '   ' })))
+      .toThrow('No API key configured for Test Provider');
+  });
+
+  it('rejects an empty endpoint with the profile name in the error', () => {
+    expect(() => createProvider(createProfile({ endpoint: '   ' })))
+      .toThrow('No endpoint configured for Test Provider');
+  });
+
+  it('rejects an empty model with the profile name in the error', () => {
+    expect(() => createProvider(createProfile({ model: '   ' })))
+      .toThrow('No model configured for Test Provider');
+  });
+});

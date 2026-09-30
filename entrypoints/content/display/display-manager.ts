@@ -58,7 +58,10 @@ export class DisplayManager {
     const trimmedTranslation = translation.trim();
     if (textNodes.length === 0 || !trimmedTranslation) return;
     if (this.entries.some((entry) => entry.segmentId === segmentId)) return;
-    if (blockElement.hasAttribute(DATA_TRANSLATED_ATTR)) return;
+    if (
+      blockElement.hasAttribute(DATA_TRANSLATED_ATTR)
+      && !this.entries.some((entry) => entry.blockElement === blockElement)
+    ) return;
     this.removeLoadingIndicator(segmentId);
 
     const originalTexts = textNodes.map((node) => node.textContent || '');
@@ -85,7 +88,10 @@ export class DisplayManager {
     textNodes: Text[] = [],
   ): void {
     if (this.loadingElements.has(segmentId)) return;
-    if (blockElement.hasAttribute(DATA_TRANSLATED_ATTR)) return;
+    if (
+      blockElement.hasAttribute(DATA_TRANSLATED_ATTR)
+      && !this.entries.some((entry) => entry.blockElement === blockElement)
+    ) return;
 
     const indicator = document.createElement('span');
     indicator.className = `${CSS_PREFIX}loading-indicator`;
@@ -186,16 +192,27 @@ export class DisplayManager {
     const mountElement = placement === 'compact'
       ? findCompactMountElement(entry.blockElement, entry.textNodes)
       : entry.blockElement;
-    translationElement.setAttribute('style', getTranslationStyle(mountElement));
+    translationElement.setAttribute(
+      'style',
+      getTranslationStyle(mountElement),
+    );
 
     if (placement === 'compact') {
       mountElement.appendChild(translationElement);
     } else if (placement === 'inline-right' || placement === 'table') {
       entry.blockElement.appendChild(translationElement);
     } else if (entry.blockElement.parentElement) {
+      const previousTranslation = [...this.entries]
+        .reverse()
+        .find((candidate) => (
+          candidate !== entry
+          && candidate.blockElement === entry.blockElement
+          && candidate.translationElement
+        ))?.translationElement;
+      const anchor = previousTranslation || entry.blockElement;
       entry.blockElement.parentElement.insertBefore(
         translationElement,
-        entry.blockElement.nextSibling,
+        anchor.nextSibling,
       );
     }
 
@@ -211,6 +228,7 @@ export class DisplayManager {
   }
 
   private applyEntryAttributes(entry: TranslationEntry): void {
+    if (entry.blockElement.hasAttribute(DATA_TRANSLATED_ATTR)) return;
     entry.blockElement.setAttribute(DATA_TRANSLATED_ATTR, 'true');
     entry.blockElement.setAttribute(DATA_SEGMENT_ATTR, entry.segmentId);
     entry.blockElement.setAttribute(DATA_ORIGINAL_ATTR, entry.originalText);
@@ -410,7 +428,7 @@ function hasLayoutSensitiveContext(element: Element): boolean {
 function getTranslationStyle(sourceElement: Element): string {
   const style = getComputedStyle(sourceElement);
   return [
-    `color: ${style.color}`,
+    `color: ${style.color || 'inherit'}`,
     `font-size: ${style.fontSize}`,
     `font-weight: ${style.fontWeight}`,
     `font-style: ${style.fontStyle}`,

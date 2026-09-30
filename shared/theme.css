@@ -1,0 +1,18 @@
+:root {
+  --tr-brand: #6366f1;
+  --tr-brand-hover: #4f46e5;
+  --tr-brand-strong: #4338ca;
+  --tr-brand-soft: #eef2ff;
+  --tr-brand-soft-strong: #e0e7ff;
+  --tr-brand-focus: rgba(99, 102, 241, 0.22);
+  --tr-page: #f8fafc;
+  --tr-surface: #ffffff;
+  --tr-surface-muted: #f9fafb;
+  --tr-surface-hover: #f3f4f6;
+  --tr-border: #d1d5db;
+  --tr-border-soft: #e5e7eb;
+  --tr-text: #1f2937;
+  --tr-text-secondary: #4b5563;
+  --tr-text-muted: #6b7280;
+  --tr-text-faint: #9ca3af;
+}

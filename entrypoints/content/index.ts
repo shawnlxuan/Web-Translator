@@ -12,6 +12,10 @@ import type {
   BackgroundToContentMessage,
 } from '../../core/messaging/message-types';
 import {
+  ContentPageRunController,
+  getRuntimeMessageError,
+} from '../../core/messaging/page-translation-messages';
+import {
   initInjector,
   toggleDisplayMode,
   getDisplayManager,
@@ -21,6 +25,11 @@ import {
 } from './dom/text-injector';
 import { MutationWatcher } from './dom/mutation-watcher';
 import { runExtractionPipeline, serializeBatches } from '../../core/translation/translation-orchestrator';
+import { prepareDynamicContentTranslation } from './dom/dynamic-content-translator';
+import {
+  DynamicContentQueue,
+  takeDynamicContentWhenComplete,
+} from './dom/dynamic-content-queue';
 import {
   addSentenceTranslation,
   createSegmentTranslationBuffers,
@@ -32,10 +41,14 @@ import {
   initFloatingTranslateButton,
   updateFloatingTranslateButtonState,
 } from './ui/floating-button';
+import {
+  initSelectionTranslator,
+  triggerSelectionTranslation,
+} from './ui/selection-translator';
 
 // Page-level state
 let pageState = TranslationState.IDLE;
-let currentPageId: string | null = null;
+const pageRunController = new ContentPageRunController();
 let currentDisplayMode: DisplayMode = 'bilingual';
 let extractedNodes: ExtractedTextNode[] = [];
 let segments: Segment[] = [];
@@ -46,8 +59,13 @@ let mutationWatcher: MutationWatcher | null = null;
 let segmentBuffers = new Map<string, SegmentTranslationBuffer>();
 let currentSourceLang = 'auto';
 let currentTargetLang = 'zh-CN';
+let currentBatchSize = 10;
+let currentDispatchConcurrency = 5;
+let currentContextWindowSize = 3;
+let currentEnableMutationObserver = true;
 let errorMessage: string | null = null;
 let translationRunId = 0;
+const dynamicContentQueue = new DynamicContentQueue<Node>();
 
 // Content script entry point
 import './styles.css';
@@ -58,6 +76,7 @@ initFloatingTranslateButton({
   onStart: startTranslationFromFloatingButton,
   onStop: stopTranslationFromFloatingButton,
 });
+initSelectionTranslator();
 
 chrome.runtime.onMessage.addListener(
   (message: BackgroundToContentMessage, _sender, sendResponse) => {
@@ -72,8 +91,7 @@ chrome.runtime.onMessage.addListener(
 async function handleMessage(message: BackgroundToContentMessage) {
   switch (message.type) {
     case 'EXECUTE_TRANSLATION': {
-      await startTranslation(message);
-      break;
+      return startTranslation(message);
     }
     case 'TOGGLE_DISPLAY_MODE': {
       toggleDisplayMode(message.displayMode);
@@ -81,19 +99,24 @@ async function handleMessage(message: BackgroundToContentMessage) {
       break;
     }
     case 'INJECT_TRANSLATIONS': {
+      if (!pageRunController.accepts(message)) break;
       handleTranslationResponse(message);
       break;
     }
     case 'GET_TRANSLATION_STATE':
       return getTranslationStateResponse();
     case 'STOP_TRANSLATION': {
-      stopTranslation();
+      stopTranslation(message.pageId);
       return { type: 'TRANSLATION_STOPPED' };
     }
     case 'TRANSLATION_ERROR': {
+      if (!pageRunController.accepts(message)) break;
       failTranslation(message.error);
       break;
     }
+    case 'TRIGGER_SELECTION_TRANSLATION':
+      await triggerSelectionTranslation(message.selectionText);
+      return { type: 'SELECTION_TRANSLATION_TRIGGERED' };
   }
 }
 
@@ -107,11 +130,16 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
   clearAllTranslations();
   mutationWatcher?.stop();
   mutationWatcher = null;
+  dynamicContentQueue.start(runId);
 
-  currentPageId = msg.pageId;
+  pageRunController.start(msg.pageId);
   currentDisplayMode = msg.displayMode;
   currentTargetLang = msg.targetLang;
   currentSourceLang = msg.sourceLang || 'auto';
+  currentBatchSize = msg.batchSize;
+  currentDispatchConcurrency = clampNumber(msg.maxConcurrentCalls, 1, 10);
+  currentContextWindowSize = msg.contextWindowSize;
+  currentEnableMutationObserver = msg.enableMutationObserver;
   errorMessage = null;
   pageState = TranslationState.EXTRACTING;
   isTranslating = true;
@@ -123,17 +151,20 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
   notifyStateChange();
 
   try {
+    if (currentEnableMutationObserver) {
+      startMutationWatcher(runId);
+    }
+
     // Initialize injector with the configured display mode (once, before the loop)
     initInjector(currentDisplayMode);
 
-    // Read settings for batch size
-    const stored = await chrome.storage.local.get('ai_translator_settings');
-    const settings = stored.ai_translator_settings || {};
-    const batchSize = settings.batchSize || 10;
-    const dispatchConcurrency = clampNumber(settings.maxConcurrentCalls || 5, 1, 10);
-
     // Run extraction pipeline with configured batch size
-    const result = runExtractionPipeline(msg.targetLang, msg.sourceLang, batchSize);
+    const result = runExtractionPipeline(
+      msg.targetLang,
+      msg.sourceLang,
+      currentBatchSize,
+      currentContextWindowSize,
+    );
     extractedNodes = result.extractedNodes;
     segments = result.segments;
     currentSourceLang = result.sourceLang;
@@ -143,7 +174,7 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
     showLoadingIndicators(segments);
 
     console.log(
-      `[AI Translator] Extracted ${extractedNodes.length} text nodes → ${segments.length} segments → ${result.batches.length} batches (size: ${batchSize})`,
+      `[AI Translator] Extracted ${extractedNodes.length} text nodes → ${segments.length} segments → ${result.batches.length} batches (size: ${currentBatchSize})`,
     );
 
     // Update state
@@ -153,19 +184,15 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
     // Dispatch in page order while keeping a small concurrent window open.
     const serializedBatches = serializeBatches(result.batches);
     if (serializedBatches.length > 0 && isTranslating) {
-      sendBatchesInOrder(serializedBatches, dispatchConcurrency, runId);
+      sendBatchesInOrder(serializedBatches, currentDispatchConcurrency, runId);
     } else {
       completeTranslation();
     }
   } catch (error: any) {
     console.error('[AI Translator] Pipeline error:', error);
-    failTranslation(error.message || String(error));
-    // Send error to background so popup can see it
-    chrome.runtime.sendMessage({
-      type: 'TRANSLATION_ERROR',
-      pageId: currentPageId,
-      error: error.message || String(error),
-    }).catch(() => {});
+    const message = error.message || String(error);
+    failTranslation(message);
+    return { error: message };
   }
 }
 
@@ -212,6 +239,12 @@ function sendBatchesInOrder(
   concurrency: number,
   runId: number,
 ) {
+  const pageId = pageRunController.pageId;
+  if (!pageId) {
+    failTranslation('Translation run expired before batch dispatch');
+    return;
+  }
+
   let nextIndex = 0;
   let inFlight = 0;
 
@@ -225,12 +258,20 @@ function sendBatchesInOrder(
 
       chrome.runtime.sendMessage({
         type: 'SEGMENTS_READY',
-        pageId: currentPageId,
+        pageId,
         sourceLang: currentSourceLang,
         targetLang: currentTargetLang,
         batch,
+      }).then((response) => {
+        const responseError = getRuntimeMessageError(response);
+        if (responseError && runId === translationRunId) {
+          failTranslation(responseError);
+        }
       }).catch((err) => {
         console.error('[AI Translator] Failed to send batch:', err);
+        if (runId === translationRunId) {
+          failTranslation(err.message || String(err));
+        }
       }).finally(() => {
         inFlight--;
         pump();
@@ -248,34 +289,51 @@ function completeTranslation() {
   errorMessage = null;
   notifyStateChange();
 
-  // Start mutation observer for dynamic content
-  getSettingsFromStorage().then((settings) => {
-    if (settings?.enableMutationObserver !== false) {
-      startMutationWatcher();
+  if (currentEnableMutationObserver) {
+    if (!mutationWatcher) {
+      startMutationWatcher(translationRunId);
     }
-  });
+    dynamicContentQueue.finish(translationRunId);
+    processQueuedDynamicContent(
+      takeDynamicContentWhenComplete(
+        dynamicContentQueue,
+        translationRunId,
+        pageState,
+      ),
+      translationRunId,
+    );
+  }
 }
 
-function stopTranslation() {
+function stopTranslation(pageId: string): boolean {
+  if (!pageRunController.stop(pageId)) return false;
+  const stoppedRunId = translationRunId;
   translationRunId++;
   isTranslating = false;
   pageState = TranslationState.IDLE;
   errorMessage = null;
   mutationWatcher?.stop();
   mutationWatcher = null;
+  dynamicContentQueue.clear(stoppedRunId);
   clearAllTranslations();
   extractedNodes = [];
   segments = [];
   segmentBuffers = new Map();
   notifyStateChange();
+  return true;
 }
 
 function failTranslation(error: string) {
+  const failedRunId = translationRunId;
+  const failedPageId = pageRunController.pageId;
   translationRunId++;
   isTranslating = false;
   pageState = TranslationState.ERROR;
   errorMessage = error;
+  if (failedPageId) pageRunController.stop(failedPageId);
   mutationWatcher?.stop();
+  mutationWatcher = null;
+  dynamicContentQueue.clear(failedRunId);
   clearLoadingIndicators();
   notifyStateChange();
 }
@@ -287,25 +345,72 @@ function clampNumber(value: number, min: number, max: number): number {
 /**
  * Start watching for dynamically loaded content.
  */
-function startMutationWatcher() {
+function startMutationWatcher(watcherRunId: number) {
   if (mutationWatcher) return;
 
-  mutationWatcher = new MutationWatcher(async (newNodes) => {
-    console.log('[AI Translator] New content detected, re-extracting...');
-
-    // TODO: Incremental extraction + translation
-    // For now, just log that new content was detected
-    console.log(`[AI Translator] ${newNodes.length} new nodes detected`);
+  mutationWatcher = new MutationWatcher((newNodes) => {
+    dynamicContentQueue.enqueue(watcherRunId, newNodes);
+    processQueuedDynamicContent(
+      takeDynamicContentWhenComplete(
+        dynamicContentQueue,
+        watcherRunId,
+        pageState,
+      ),
+      watcherRunId,
+    );
   });
 
   mutationWatcher.start();
+}
+
+function processQueuedDynamicContent(newNodes: Node[], runId: number): void {
+  let nextNodes = newNodes;
+  while (nextNodes.length > 0) {
+    if (translateNewContent(nextNodes, runId)) return;
+    dynamicContentQueue.finish(runId);
+    nextNodes = dynamicContentQueue.take(runId);
+  }
+}
+
+function translateNewContent(newNodes: Node[], runId: number): boolean {
+  const work = prepareDynamicContentTranslation(newNodes, {
+    pageState,
+    watcherActive: mutationWatcher?.active === true,
+    runId,
+    currentRunId: translationRunId,
+    sourceLang: currentSourceLang,
+    targetLang: currentTargetLang,
+    batchSize: currentBatchSize,
+    contextWindowSize: currentContextWindowSize,
+    existingNodes: extractedNodes,
+  });
+
+  if (!work) return false;
+
+  extractedNodes = work.allNodes;
+  segments = [...segments, ...work.segments];
+  for (const [segmentId, buffer] of work.segmentBuffers) {
+    segmentBuffers.set(segmentId, buffer);
+  }
+
+  totalSegments = segments.length;
+  showLoadingIndicators(work.segments);
+  pageState = TranslationState.TRANSLATING;
+  isTranslating = true;
+  notifyStateChange();
+
+  console.log(
+    `[AI Translator] Translating ${work.segments.length} new dynamic segments`,
+  );
+  sendBatchesInOrder(work.serializedBatches, currentDispatchConcurrency, runId);
+  return true;
 }
 
 function notifyStateChange() {
   updateFloatingTranslateButtonState(pageState);
   chrome.runtime.sendMessage({
     type: 'TRANSLATION_STATE_UPDATE',
-    pageId: currentPageId,
+    pageId: pageRunController.pageId,
     state: pageState,
     totalSegments,
     translatedSegments,
@@ -328,19 +433,15 @@ async function stopTranslationFromFloatingButton() {
   try {
     await chrome.runtime.sendMessage({ type: 'STOP_TRANSLATION' });
   } catch {
-    stopTranslation();
+    const pageId = pageRunController.pageId;
+    if (pageId) stopTranslation(pageId);
   }
-}
-
-async function getSettingsFromStorage() {
-  const result = await chrome.storage.local.get('ai_translator_settings');
-  return result.ai_translator_settings || null;
 }
 
 function getTranslationStateResponse() {
   return {
     type: 'TRANSLATION_STATE_UPDATE',
-    pageId: currentPageId,
+    pageId: pageRunController.pageId,
     state: pageState,
     totalSegments,
     translatedSegments,

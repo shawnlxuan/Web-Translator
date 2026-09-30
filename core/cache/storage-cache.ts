@@ -59,7 +59,7 @@ export class StorageCache {
 
     try {
       await chrome.storage.local.set({ [storageKey]: entry });
-    } catch (error) {
+    } catch {
       // Storage might be full — trigger cleanup
       console.warn('[StorageCache] Storage full, triggering cleanup');
       await this.cleanup();

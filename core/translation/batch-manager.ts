@@ -13,6 +13,8 @@ export interface BatchConfig {
   sourceLang: string;
   /** Target language */
   targetLang: string;
+  /** Number of neighboring sentences on each side. */
+  contextWindowSize: number;
 }
 
 /**
@@ -31,7 +33,13 @@ export function createBatches(
   for (const segment of segments) {
     for (let i = 0; i < segment.sentences.length; i++) {
       const sentence = segment.sentences[i];
-      const context = collectContext(sentence, i, segment, allNodes);
+      const context = collectContext(
+        sentence,
+        i,
+        segment,
+        allNodes,
+        config.contextWindowSize,
+      );
 
       allSentences.push({
         sentenceIndex: i,

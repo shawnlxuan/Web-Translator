@@ -105,6 +105,21 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * Keep user-configured translation colors safe for inline CSS usage.
+ */
+export function sanitizeTranslationColor(
+  value: unknown,
+  fallback: string = '#6366f1',
+): string {
+  const colorPattern = /^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i;
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (colorPattern.test(normalized)) return normalized;
+
+  const normalizedFallback = fallback.trim().toLowerCase();
+  return colorPattern.test(normalizedFallback) ? normalizedFallback : '#6366f1';
+}
+
+/**
  * Normalize a language code for use with Intl APIs.
  */
 export function normalizeLangCode(lang: string): string {

@@ -5,69 +5,43 @@
 import type { LLMProvider } from './provider-interface';
 import { OpenAIProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
-import type { Settings } from '../../shared/types';
+import type { ProviderProfile } from '../../shared/types';
+import { validateProviderEndpoint } from '../../shared/provider-presets';
 
 /**
- * Create an LLM provider instance based on extension settings.
+ * Create an LLM provider instance from a sanitized provider profile.
  */
-export function createProvider(settings: Settings): LLMProvider {
-  return createProviderFromConfig(
-    settings.provider,
-    settings.apiKeys[settings.provider],
-    settings.models[settings.provider],
-    settings.customEndpoints[settings.provider],
-  );
-}
+export function createProvider(profile: ProviderProfile): LLMProvider {
+  const profileName = profile.name.trim() || profile.id;
+  const apiKey = profile.apiKey.trim();
+  const endpoint = profile.endpoint.trim();
+  const model = profile.model.trim();
 
-/**
- * Create a provider from explicit config values.
- */
-export function createProviderFromConfig(
-  providerType: string,
-  apiKey: string,
-  _model: string,
-  endpoint?: string,
-): LLMProvider {
   if (!apiKey) {
     throw new Error(
-      `No API key configured for ${providerType}. Please set your API key in Settings.`,
+      `No API key configured for ${profileName}. Please set it in Settings.`,
     );
   }
 
-  switch (providerType) {
-    case 'openai':
-      return new OpenAIProvider(apiKey, endpoint || 'https://api.openai.com/v1');
-    case 'anthropic':
-      return new AnthropicProvider(apiKey, endpoint || 'https://api.anthropic.com');
-    case 'deepseek':
-      return new OpenAIProvider(apiKey, endpoint || 'https://api.deepseek.com/v1');
-    case 'glm':
-      return new OpenAIProvider(apiKey, endpoint || 'https://open.bigmodel.cn/api/paas/v4');
-    case 'mimo':
-      return new OpenAIProvider(apiKey, endpoint || 'https://api.minimax.chat/v1');
-    case 'custom':
-      if (!endpoint) {
-        throw new Error(
-          'Custom provider requires an endpoint URL. Please configure it in Settings.',
-        );
-      }
-      return new OpenAIProvider(apiKey, endpoint);
-    default:
-      throw new Error(`Unknown provider type: ${providerType}`);
+  if (!endpoint) {
+    throw new Error(
+      `No endpoint configured for ${profileName}. Please set it in Settings.`,
+    );
   }
-}
 
-/**
- * Get the default model for a provider type.
- */
-export function getDefaultModel(providerType: string): string {
-  switch (providerType) {
-    case 'openai': return 'gpt-4o';
-    case 'anthropic': return 'claude-sonnet-4-20250514';
-    case 'deepseek': return 'deepseek-chat';
-    case 'glm': return 'glm-4-flash';
-    case 'mimo': return 'abab6.5s-chat';
-    case 'custom': return 'gpt-4o';
-    default: return 'gpt-4o';
+  if (!model) {
+    throw new Error(
+      `No model configured for ${profileName}. Please set it in Settings.`,
+    );
+  }
+  const validatedEndpoint = validateProviderEndpoint(endpoint, profile.protocol);
+
+  switch (profile.protocol) {
+    case 'anthropic':
+      return new AnthropicProvider(apiKey, validatedEndpoint);
+    case 'openai-compatible':
+      return new OpenAIProvider(apiKey, validatedEndpoint);
+    default:
+      throw new Error(`Unsupported provider protocol: ${String(profile.protocol)}`);
   }
 }

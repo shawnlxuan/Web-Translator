@@ -34,49 +34,79 @@
 
 .tr-block-translation {
   display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
-  border-left: 3px solid currentColor;
-  padding-left: 1em;
-  margin: 0.25em 0;
+  margin: 0.22em 0 0.36em;
+  padding: 0.16em 0.52em;
+  border: 0;
+  border-radius: 2px;
+  background-color: rgba(99, 102, 241, 0.06);
 }
 
 .tr-inline-right-translation {
-  display: inline;
+  display: inline-block;
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
-  margin-left: 0.45em;
-  white-space: normal;
+  margin-left: 0.32em;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .tr-compact-translation {
-  display: inline;
+  display: inline-block;
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
   font-style: inherit;
   line-height: inherit;
-  margin-left: 0.36em;
+  margin-left: 0.32em;
   padding: 0;
   border: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  border-radius: 0;
+  background: transparent;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.tr-inline-right-translation::before,
+.tr-compact-translation::before {
+  content: '·';
+  margin-right: 0.32em;
+  color: inherit;
+  opacity: 0.45;
 }
 
 .tr-table-translation {
   display: block;
+  max-width: 100%;
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
   font-style: inherit;
   line-height: inherit;
-  margin-top: 0.2em;
-  padding: 0;
+  margin-top: 0.14em;
+  padding: 0.06em 0.28em;
   border: 0;
+  border-radius: 0;
+  background: transparent;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.tr-table-translation::before {
+  content: '↳';
+  margin-right: 0.3em;
+  color: inherit;
+  opacity: 0.45;
 }
 
 

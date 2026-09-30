@@ -1,7 +1,9 @@
 // ============================================================
-// Token bucket rate limiter for API calls
+// Semaphore rate limiter for API calls
 // Controls concurrency and provides retry logic
 // ============================================================
+
+import { isRetryableNetworkError } from './http-client';
 
 export interface RateLimiterConfig {
   /** Maximum concurrent API calls */
@@ -10,6 +12,8 @@ export interface RateLimiterConfig {
   maxRetries429: number;
   /** Maximum retries for server errors (5xx) */
   maxRetries5xx: number;
+  /** Maximum retries for network failures and request timeouts */
+  maxRetriesNetwork: number;
   /** Base delay for exponential backoff (ms) */
   baseDelayMs: number;
   /** Maximum delay cap (ms) */
@@ -20,16 +24,16 @@ const DEFAULT_CONFIG: RateLimiterConfig = {
   maxConcurrent: 3,
   maxRetries429: 3,
   maxRetries5xx: 2,
+  maxRetriesNetwork: 1,
   baseDelayMs: 1000,
   maxDelayMs: 30000,
 };
 
 /**
- * Token bucket rate limiter with retry logic.
+ * Strict concurrency semaphore with retry logic.
  */
 export class RateLimiter {
-  private tokens: number;
-  private lastRefill: number;
+  private running = 0;
   private queue: Array<{
     resolve: () => void;
   }> = [];
@@ -37,21 +41,10 @@ export class RateLimiter {
 
   constructor(config: Partial<RateLimiterConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.tokens = this.config.maxConcurrent;
-    this.lastRefill = Date.now();
   }
 
   configure(config: Partial<RateLimiterConfig>): void {
-    const previousMaxConcurrent = this.config.maxConcurrent;
     this.config = { ...this.config, ...config };
-
-    if (this.config.maxConcurrent < previousMaxConcurrent) {
-      this.tokens = Math.min(this.tokens, this.config.maxConcurrent);
-    } else if (this.config.maxConcurrent > previousMaxConcurrent) {
-      this.tokens += this.config.maxConcurrent - previousMaxConcurrent;
-      this.tokens = Math.min(this.tokens, this.config.maxConcurrent);
-    }
-
     this.processQueue();
   }
 
@@ -60,10 +53,8 @@ export class RateLimiter {
    * Returns when a token is available.
    */
   async acquire(): Promise<void> {
-    this.refill();
-
-    if (this.tokens > 0) {
-      this.tokens--;
+    if (this.running < this.config.maxConcurrent) {
+      this.running++;
       return;
     }
 
@@ -77,7 +68,9 @@ export class RateLimiter {
    * Release a token after an API call completes.
    */
   release(): void {
-    this.tokens = Math.min(this.tokens + 1, this.config.maxConcurrent);
+    if (this.running > 0) {
+      this.running--;
+    }
     this.processQueue();
   }
 
@@ -87,27 +80,27 @@ export class RateLimiter {
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     await this.acquire();
 
-    let retries = 0;
+    const retries = {
+      rateLimit: 0,
+      server: 0,
+      network: 0,
+    };
 
     try {
       while (true) {
         try {
           return await fn();
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const category = this.getRetryCategory(error);
+          if (!category || !this.shouldRetry(category, retries)) throw error;
 
-          const status = error.statusCode || error.status || 0;
-          const shouldRetry = this.shouldRetry(status, retries);
-
-          if (!shouldRetry) {
-            throw error;
-          }
-
-          const delay = this.calculateDelay(status, retries);
+          const attempt = retries[category];
+          const delay = this.calculateDelay(category, attempt);
           console.warn(
-            `[RateLimiter] Retry ${retries + 1} after ${delay}ms (HTTP ${status})`,
+            `[RateLimiter] Retry ${attempt + 1} after ${delay}ms (${category})`,
           );
           await sleep(delay);
-          retries++;
+          retries[category]++;
         }
       }
     } finally {
@@ -115,40 +108,51 @@ export class RateLimiter {
     }
   }
 
-  private refill(): void {
-    const now = Date.now();
-    const elapsed = now - this.lastRefill;
-    // Refill 1 token per second
-    const newTokens = Math.floor(elapsed / 1000);
-    if (newTokens > 0) {
-      this.tokens = Math.min(
-        this.tokens + newTokens,
-        this.config.maxConcurrent,
-      );
-      this.lastRefill = now;
-    }
-  }
-
   private processQueue(): void {
-    while (this.queue.length > 0 && this.tokens > 0) {
+    while (
+      this.queue.length > 0
+      && this.running < this.config.maxConcurrent
+    ) {
       const entry = this.queue.shift()!;
-      this.tokens--;
+      this.running++;
       entry.resolve();
     }
   }
 
-  private shouldRetry(status: number, retries: number): boolean {
-    if (status === 429) {
-      return retries < this.config.maxRetries429;
-    }
-    if (status >= 500) {
-      return retries < this.config.maxRetries5xx;
-    }
-    return false;
+  private getRetryCategory(
+    error: unknown,
+  ): 'rateLimit' | 'server' | 'network' | null {
+    if (isRetryableNetworkError(error)) return 'network';
+    if (typeof error !== 'object' || error === null) return null;
+    const candidate = error as { statusCode?: unknown; status?: unknown };
+    const status = typeof candidate.statusCode === 'number'
+      ? candidate.statusCode
+      : typeof candidate.status === 'number'
+        ? candidate.status
+        : 0;
+    if (status === 429) return 'rateLimit';
+    if (status >= 500) return 'server';
+    return null;
   }
 
-  private calculateDelay(status: number, retries: number): number {
-    const base = status === 429
+  private shouldRetry(
+    category: 'rateLimit' | 'server' | 'network',
+    retries: Record<'rateLimit' | 'server' | 'network', number>,
+  ): boolean {
+    if (category === 'rateLimit') {
+      return retries.rateLimit < this.config.maxRetries429;
+    }
+    if (category === 'server') {
+      return retries.server < this.config.maxRetries5xx;
+    }
+    return retries.network < this.config.maxRetriesNetwork;
+  }
+
+  private calculateDelay(
+    category: 'rateLimit' | 'server' | 'network',
+    retries: number,
+  ): number {
+    const base = category === 'rateLimit'
       ? this.config.baseDelayMs * 2 // More aggressive backoff for 429
       : this.config.baseDelayMs;
 

@@ -3,19 +3,26 @@
 // ============================================================
 
 import type { LLMProvider, TranslationRequest, TranslationResponse, StreamDelta } from './provider-interface';
-import { ProviderError } from './provider-interface';
 import { parseAnthropicSSEStream } from './sse-parser';
 import { buildBatchPrompt } from './prompt-templates';
 import { parseNumberedTranslationOutput } from './translation-output-parser';
+import {
+  createProviderErrorFromResponse,
+  fetchProviderResponse,
+} from './http-client';
+
+const TRANSLATION_TIMEOUT_MS = 45_000;
+const CONNECTION_TIMEOUT_MS = 15_000;
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'Anthropic';
-  readonly defaultModel = 'claude-sonnet-4-20250514';
+  readonly defaultModel = 'claude-sonnet-4-6';
   readonly supportsStreaming = true;
 
   constructor(
     private apiKey: string,
     private baseUrl: string = 'https://api.anthropic.com',
+    private fetcher: typeof fetch = fetch,
   ) {}
 
   /** Collect streaming results */
@@ -58,7 +65,7 @@ export class AnthropicProvider implements LLMProvider {
       request.customPromptTemplate,
     );
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
+    const response = await fetchProviderResponse(this.baseUrl, 'v1/messages', 'anthropic', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -73,15 +80,18 @@ export class AnthropicProvider implements LLMProvider {
         temperature: 0.1,
         stream: true,
       }),
+    }, {
+      providerName: this.name,
+      timeoutMs: TRANSLATION_TIMEOUT_MS,
+      fetcher: this.fetcher,
     });
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      throw new ProviderError('Anthropic', response.status, errorBody);
+      throw await createProviderErrorFromResponse(this.name, response);
     }
 
     if (!response.body) {
-      throw new ProviderError('Anthropic', 0, 'Response body is null');
+      throw new Error(`${this.name} 返回了空响应。`);
     }
 
     let fullContent = '';
@@ -105,27 +115,27 @@ export class AnthropicProvider implements LLMProvider {
     }
   }
 
-  async validateApiKey(apiKey: string): Promise<boolean> {
-    try {
-      // Anthropic doesn't have a dedicated validation endpoint,
-      // so we make a minimal message request
-      const response = await fetch(`${this.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1,
-          messages: [{ role: 'user', content: 'test' }],
-        }),
-      });
-      // A 200 means the key is valid (even if the model doesn't exist, we'd get a 404)
-      return response.ok || response.status === 404;
-    } catch {
-      return false;
+  async testConnection(model: string): Promise<void> {
+    const response = await fetchProviderResponse(this.baseUrl, 'v1/messages', 'anthropic', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Reply with OK.' }],
+      }),
+    }, {
+      providerName: this.name,
+      timeoutMs: CONNECTION_TIMEOUT_MS,
+      fetcher: this.fetcher,
+    });
+    if (!response.ok) {
+      throw await createProviderErrorFromResponse(this.name, response);
     }
+    await response.body?.cancel().catch(() => {});
   }
 }

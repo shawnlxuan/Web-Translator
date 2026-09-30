@@ -9,6 +9,7 @@ class FakeElement {
   textContent = '';
   children: FakeElement[] = [];
   display = 'block';
+  style = new FakeStyle();
   private attributes = new Map<string, string>();
 
   classList = {
@@ -97,6 +98,29 @@ class FakeElement {
     this.children.forEach((child, index) => {
       child.nextSibling = this.children[index + 1] ?? null;
     });
+  }
+}
+
+class FakeStyle {
+  color = '';
+  private colorPriority = '';
+
+  setProperty(name: string, value: string, priority: string = ''): void {
+    if (name === 'color') {
+      this.color = value;
+      this.colorPriority = priority;
+    }
+  }
+
+  removeProperty(name: string): void {
+    if (name === 'color') {
+      this.color = '';
+      this.colorPriority = '';
+    }
+  }
+
+  getPropertyPriority(name: string): string {
+    return name === 'color' ? this.colorPriority : '';
   }
 }
 
@@ -320,6 +344,253 @@ describe('DisplayManager', () => {
 
     expect(injected).toBeUndefined();
     expect(row.hasAttribute('data-tr-translated')).toBe(false);
+  });
+
+  it('inherits the computed source color in every bilingual placement', () => {
+    const tableRow = new FakeElement('tr');
+    const tableCell = new FakeElement('td', { width: 240, height: 24 });
+    tableRow.appendChild(tableCell);
+
+    const flexRow = new FakeElement('div', { width: 504, height: 24 });
+    flexRow.display = 'flex';
+    const flexText = new FakeElement('span');
+    flexRow.appendChild(flexText);
+
+    const article = new FakeElement('article');
+    const paragraph = new FakeElement('p', { width: 740, height: 72 });
+    article.appendChild(paragraph);
+
+    const list = new FakeElement('ul');
+    const listItem = new FakeElement('li', {
+      left: 20,
+      right: 240,
+      width: 220,
+      height: 20,
+    });
+    list.appendChild(listItem);
+
+    const cases = [
+      { element: tableCell, textParent: tableCell, segmentId: 'table' },
+      { element: flexRow, textParent: flexText, segmentId: 'compact' },
+      { element: paragraph, textParent: paragraph, segmentId: 'block' },
+      { element: listItem, textParent: listItem, segmentId: 'inline' },
+    ];
+
+    for (const item of cases) {
+      const manager = new DisplayManager('bilingual');
+      manager.injectSegment(
+        item.element as unknown as Element,
+        [{ textContent: 'Source', parentElement: item.textParent } as unknown as Text],
+        '译文',
+        item.segmentId,
+      );
+
+      const translation = item.textParent.children.find((child) => (
+        child.getAttribute('data-tr-injected') === 'true'
+      )) ?? item.element.parentElement?.children.find((child) => (
+        child.getAttribute('data-tr-injected') === 'true'
+      ));
+      expect(translation?.getAttribute('style')).toContain('color: rgb(20, 20, 20)');
+    }
+  });
+
+  it('keeps the original element color during replace mode switches and clearing', () => {
+    const paragraph = new FakeElement('p');
+    paragraph.setAttribute('style', 'color: green');
+    paragraph.style.setProperty('color', 'green', 'important');
+    const textNode = {
+      textContent: 'Source text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const manager = new DisplayManager('replace');
+
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '译文',
+      'replace-color',
+    );
+    expect(paragraph.style.color).toBe('green');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+
+    manager.toggleMode('bilingual');
+    expect(paragraph.style.color).toBe('green');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+
+    manager.toggleMode('replace');
+    expect(paragraph.style.color).toBe('green');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+
+    manager.clearAll();
+    expect(paragraph.style.color).toBe('green');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+    expect(textNode.textContent).toBe('Source text');
+  });
+
+  it('keeps the nested text owner color in replace mode', () => {
+    const paragraph = new FakeElement('p');
+    const nested = new FakeElement('span');
+    nested.setAttribute('style', 'color: red');
+    nested.style.setProperty('color', 'red', 'important');
+    paragraph.appendChild(nested);
+    const textNode = {
+      textContent: 'Nested source',
+      parentElement: nested,
+    } as unknown as Text;
+    const manager = new DisplayManager('replace');
+
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '嵌套译文',
+      'nested-replace-color',
+    );
+
+    expect(nested.style.color).toBe('red');
+    expect(nested.style.getPropertyPriority('color')).toBe('important');
+    expect(paragraph.style.color).toBe('');
+
+    manager.clearAll();
+    expect(nested.style.color).toBe('red');
+    expect(nested.style.getPropertyPriority('color')).toBe('important');
+    expect(nested.hasAttribute('style')).toBe(true);
+  });
+
+  it('does not add a style attribute to a nested replace owner that had none', () => {
+    const paragraph = new FakeElement('p');
+    paragraph.setAttribute('style', 'font-weight: bold');
+    const nested = new FakeElement('span');
+    paragraph.appendChild(nested);
+    const textNode = {
+      textContent: 'Nested source',
+      parentElement: nested,
+    } as unknown as Text;
+    const manager = new DisplayManager('replace');
+
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '嵌套译文',
+      'nested-no-style',
+    );
+    expect(nested.hasAttribute('style')).toBe(false);
+
+    manager.clearAll();
+
+    expect(nested.hasAttribute('style')).toBe(false);
+  });
+
+  it('does not alter a host color changed while bilingual mode is active', () => {
+    const article = new FakeElement('article');
+    const paragraph = new FakeElement('p');
+    article.appendChild(paragraph);
+    paragraph.style.setProperty('color', 'green');
+    const textNode = {
+      textContent: 'Source text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '译文',
+      'bilingual-theme-change',
+    );
+
+    paragraph.style.setProperty('color', 'blue', 'important');
+    manager.clearAll();
+
+    expect(paragraph.style.color).toBe('blue');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+  });
+
+  it('keeps a host theme color when switching from bilingual to replace mode', () => {
+    const article = new FakeElement('article');
+    const paragraph = new FakeElement('p');
+    article.appendChild(paragraph);
+    paragraph.style.setProperty('color', 'green');
+    const textNode = {
+      textContent: 'Source text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '译文',
+      'replace-apply-snapshot',
+    );
+    paragraph.style.setProperty('color', 'blue', 'important');
+
+    manager.toggleMode('replace');
+    expect(paragraph.style.color).toBe('blue');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+    manager.toggleMode('bilingual');
+
+    expect(paragraph.style.color).toBe('blue');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+  });
+
+  it('does not overwrite a host color change made while replace mode is active', () => {
+    const paragraph = new FakeElement('p');
+    paragraph.style.setProperty('color', 'green');
+    const textNode = {
+      textContent: 'Source text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const manager = new DisplayManager('replace');
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [textNode],
+      '译文',
+      'replace-host-ownership',
+    );
+
+    paragraph.style.setProperty('color', 'purple', 'important');
+    manager.toggleMode('bilingual');
+
+    expect(paragraph.style.color).toBe('purple');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+    manager.clearAll();
+
+    expect(paragraph.style.color).toBe('purple');
+    expect(paragraph.style.getPropertyPriority('color')).toBe('important');
+  });
+
+  it('allows a new dynamic segment inside an already translated host block', () => {
+    const article = new FakeElement('article');
+    const paragraph = new FakeElement('p', { width: 600, height: 48 });
+    article.appendChild(paragraph);
+    const firstText = {
+      textContent: 'Initial text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const dynamicText = {
+      textContent: 'New text',
+      parentElement: paragraph,
+    } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [firstText],
+      '初始文本',
+      'seg-initial',
+    );
+    manager.injectSegment(
+      paragraph as unknown as Element,
+      [dynamicText],
+      '新文本',
+      'seg-dynamic',
+    );
+
+    const translations = article.children.filter((child) => (
+      child.getAttribute('data-tr-injected') === 'true'
+    ));
+    expect(translations.map((element) => element.textContent)).toEqual([
+      '初始文本',
+      '新文本',
+    ]);
   });
 });
 

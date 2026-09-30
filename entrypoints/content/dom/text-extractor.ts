@@ -17,13 +17,15 @@ export interface ExtractionOptions {
   minTextLength?: number;
   /** Root element to extract from */
   root?: Element;
+  /** Allow new host content beneath an already translated source block. */
+  allowWithinTranslatedRoot?: boolean;
 }
 
-const DEFAULT_OPTIONS: Required<ExtractionOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<ExtractionOptions, 'root'>> = {
   includeNav: false,
   includeOffscreen: true,
   minTextLength: MIN_TEXT_LENGTH,
-  root: document.body,
+  allowWithinTranslatedRoot: false,
 };
 
 /**
@@ -33,7 +35,11 @@ const DEFAULT_OPTIONS: Required<ExtractionOptions> = {
 export function extractTextNodes(
   options: ExtractionOptions = {},
 ): ExtractedTextNode[] {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const opts = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+    root: options.root ?? document.body,
+  };
   const results: ExtractedTextNode[] = [];
 
   const walker = document.createTreeWalker(
@@ -44,7 +50,9 @@ export function extractTextNodes(
   let node: Text | null;
   while ((node = walker.nextNode() as Text | null)) {
     // Check if we should skip
-    if (shouldSkipNode(node)) continue;
+    if (shouldSkipNode(node, {
+      dynamicRoot: opts.allowWithinTranslatedRoot ? opts.root : undefined,
+    })) continue;
 
     // Check navigation content
     if (!opts.includeNav && isNavContent(node)) continue;

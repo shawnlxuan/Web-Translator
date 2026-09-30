@@ -9,7 +9,7 @@ interface ModeToggleProps {
 const ModeToggle: React.FC<ModeToggleProps> = ({ value, onChange }) => {
   return (
     <div className="form-group">
-      <label className="form-label">Mode</label>
+      <label className="form-label">显示</label>
       <div className="mode-toggle">
         <button
           className={`mode-btn ${value === 'bilingual' ? 'active' : ''}`}

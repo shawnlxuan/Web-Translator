@@ -4,10 +4,16 @@
 // ============================================================
 
 import type { LLMProvider, TranslationRequest, TranslationResponse, StreamDelta } from './provider-interface';
-import { ProviderError } from './provider-interface';
 import { parseOpenAISSEStream } from './sse-parser';
 import { buildBatchPrompt } from './prompt-templates';
 import { parseNumberedTranslationOutput } from './translation-output-parser';
+import {
+  createProviderErrorFromResponse,
+  fetchProviderResponse,
+} from './http-client';
+
+const TRANSLATION_TIMEOUT_MS = 45_000;
+const CONNECTION_TIMEOUT_MS = 15_000;
 
 export class OpenAIProvider implements LLMProvider {
   readonly name = 'OpenAI';
@@ -17,6 +23,7 @@ export class OpenAIProvider implements LLMProvider {
   constructor(
     private apiKey: string,
     private baseUrl: string = 'https://api.openai.com/v1',
+    private fetcher: typeof fetch = fetch,
   ) {}
 
   /** Collect streaming results into a single response */
@@ -41,9 +48,7 @@ export class OpenAIProvider implements LLMProvider {
     request: TranslationRequest,
   ): AsyncIterable<StreamDelta> {
     const { systemPrompt, userMessage } = buildOpenAIBatchPrompt(request);
-    const endpoint = `${this.baseUrl}/chat/completions`;
-
-    const response = await fetch(endpoint, {
+    const response = await fetchProviderResponse(this.baseUrl, 'chat/completions', 'openai-compatible', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -59,26 +64,28 @@ export class OpenAIProvider implements LLMProvider {
         max_tokens: 4096,
         stream: true,
       }),
+    }, {
+      providerName: this.name,
+      timeoutMs: TRANSLATION_TIMEOUT_MS,
+      fetcher: this.fetcher,
     });
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}));
-      throw new ProviderError('OpenAI', response.status, errorBody);
-    }
-
-    if (!response.body) {
-      throw new ProviderError('OpenAI', 0, 'Response body is null');
+      throw await createProviderErrorFromResponse(this.name, response);
     }
 
     let fullContent = '';
-
-    for await (const chunk of parseOpenAISSEStream(response.body)) {
-      if (chunk.content) {
-        fullContent += chunk.content;
+    if (isJsonResponse(response)) {
+      fullContent = extractOpenAIContent(await response.json());
+    } else {
+      if (!response.body) {
+        throw new Error(`${this.name} 返回了空响应。`);
       }
-
-      if (chunk.finishReason === 'stop') {
-        break;
+      for await (const chunk of parseOpenAISSEStream(response.body)) {
+        if (chunk.content) {
+          fullContent += chunk.content;
+        }
+        if (chunk.finishReason === 'stop') break;
       }
     }
 
@@ -91,34 +98,28 @@ export class OpenAIProvider implements LLMProvider {
     }
   }
 
-  async validateApiKey(apiKey: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/models`, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-      });
-      return response.ok;
-    } catch {
-      return false;
+  async testConnection(model: string): Promise<void> {
+    const response = await fetchProviderResponse(this.baseUrl, 'chat/completions', 'openai-compatible', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Reply with OK.' }],
+        max_tokens: 1,
+        stream: false,
+      }),
+    }, {
+      providerName: this.name,
+      timeoutMs: CONNECTION_TIMEOUT_MS,
+      fetcher: this.fetcher,
+    });
+    if (!response.ok) {
+      throw await createProviderErrorFromResponse(this.name, response);
     }
-  }
-
-  async listModels(apiKey: string): Promise<string[]> {
-    try {
-      const response = await fetch(`${this.baseUrl}/models`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-      });
-      if (!response.ok) return [];
-      const data = await response.json() as any;
-      return (data.data || [])
-        .map((m: any) => m.id)
-        .filter((id: string) =>
-          id.startsWith('gpt-') || id.startsWith('o1') || id.startsWith('o3'),
-        );
-    } catch {
-      return [];
-    }
+    await response.body?.cancel().catch(() => {});
   }
 }
 
@@ -145,4 +146,39 @@ function buildOpenAIBatchPrompt(request: TranslationRequest) {
     pageContext,
     request.customPromptTemplate,
   );
+}
+
+function isJsonResponse(response: Response): boolean {
+  return response.headers.get('content-type')?.toLowerCase().includes('application/json')
+    ?? false;
+}
+
+function extractOpenAIContent(body: unknown): string {
+  if (typeof body !== 'object' || body === null) {
+    throw new Error('OpenAI-compatible 接口返回了无效的 JSON。');
+  }
+  const record = body as {
+    error?: unknown;
+    choices?: Array<{
+      message?: { content?: unknown };
+      delta?: { content?: unknown };
+    }>;
+  };
+  if (record.error) {
+    throw new Error(`OpenAI-compatible 接口返回错误：${formatJsonError(record.error)}`);
+  }
+  const content = record.choices?.[0]?.message?.content
+    ?? record.choices?.[0]?.delta?.content;
+  if (typeof content !== 'string') {
+    throw new Error('OpenAI-compatible 接口响应缺少 choices[0].message.content。');
+  }
+  return content;
+}
+
+function formatJsonError(error: unknown): string {
+  try {
+    return JSON.stringify(error).slice(0, 500);
+  } catch {
+    return String(error).slice(0, 500);
+  }
 }
