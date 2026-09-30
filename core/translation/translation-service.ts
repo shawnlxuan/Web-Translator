@@ -23,7 +23,10 @@ export interface CachedTranslationRequest {
   targetLang: string;
 }
 
-type TranslationProvider = Pick<LLMProvider, 'translateBatch'>;
+export type TranslationProgressCallback = (results: TranslationResult[]) => Promise<void>;
+
+type TranslationProvider = Pick<LLMProvider, 'translateBatch'>
+  & Partial<Pick<LLMProvider, 'translateBatchStream'>>;
 type TranslationCache = Pick<CacheManager, 'get' | 'set'>;
 type TranslationLimiter = Pick<RateLimiter, 'execute'>;
 
@@ -50,10 +53,20 @@ export class CachedTranslationService {
 
   async translate(
     request: CachedTranslationRequest,
+    onProgress?: TranslationProgressCallback,
   ): Promise<TranslationResult[]> {
     const signal = this.dependencies.signal;
     signal?.throwIfAborted();
     const results = new Map<number, TranslationResult>();
+    const published = new Set<number>();
+    const publish = async (items: Array<{ inputIndex: number; result: TranslationResult }>) => {
+      signal?.throwIfAborted();
+      const fresh = items.filter(({ inputIndex }) => !published.has(inputIndex));
+      if (!onProgress || fresh.length === 0) return;
+      await onProgress(fresh.map(({ result }) => result));
+      signal?.throwIfAborted();
+      fresh.forEach(({ inputIndex }) => published.add(inputIndex));
+    };
 
     await Promise.all(request.sentences.map(async (sentence, inputIndex) => {
       const cached = await this.dependencies.cache.get(
@@ -71,17 +84,38 @@ export class CachedTranslationService {
       }
     }));
     signal?.throwIfAborted();
+    await publish(Array.from(results, ([inputIndex, result]) => ({ inputIndex, result })));
 
     const misses = request.sentences
       .map((sentence, inputIndex) => ({ sentence, inputIndex }))
       .filter(({ inputIndex }) => !results.has(inputIndex));
 
     if (misses.length > 0) {
-      const response = await this.dependencies.limiter.execute(() => (
-        this.dependencies.provider.translateBatch(
-          this.createProviderRequest(request, misses),
-        )
-      ), signal);
+      const response = await this.dependencies.limiter.execute(async () => {
+        const providerRequest = this.createProviderRequest(request, misses);
+        const provider = this.dependencies.provider;
+        if (!onProgress || !provider.translateBatchStream) {
+          return provider.translateBatch(providerRequest);
+        }
+
+        // The MT adapter yields a completed sentence after each HTTP response,
+        // even though the underlying HTTP request uses non-streaming JSON.
+        const translations = new Map<number, string>();
+        for await (const delta of provider.translateBatchStream(providerRequest)) {
+          signal?.throwIfAborted();
+          if (!Number.isInteger(delta.index) || !misses[delta.index]) continue;
+          const text = (translations.get(delta.index) ?? '') + delta.delta;
+          translations.set(delta.index, text);
+          if (delta.done) {
+            const completed = this.resolveApiResults({ translations: [{ index: delta.index, text }] }, misses);
+            await publish(completed.map(({ source, translation }) => ({
+              inputIndex: source.inputIndex,
+              result: toResult(source.sentence, translation, false),
+            })));
+          }
+        }
+        return { translations: Array.from(translations, ([index, text]) => ({ index, text })) };
+      }, signal);
       signal?.throwIfAborted();
       const apiResults = this.resolveApiResults(response, misses);
 
@@ -110,6 +144,10 @@ export class CachedTranslationService {
           this.customPromptTemplate,
         )
       )));
+      await publish(apiResults.map(({ source }) => ({
+        inputIndex: source.inputIndex,
+        result: results.get(source.inputIndex)!,
+      })));
     }
 
     return request.sentences.map((_, inputIndex) => results.get(inputIndex)!);

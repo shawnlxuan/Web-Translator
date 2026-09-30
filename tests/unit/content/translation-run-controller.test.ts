@@ -15,6 +15,69 @@ import { TextType } from '../../../shared/types';
 import type { TranslationResult } from '../../../shared/types';
 
 describe('translation run controller', () => {
+  it('injects progress before completion and sends each sentence only once', async () => {
+    const remaining = deferred<TranslationResult[]>();
+    const progressSent = deferred<void>();
+    const first = createTranslationResult();
+    const second = { ...first, segmentId: 'segment-2', translation: '世界' };
+    const registry = new ActiveRunRegistry<TranslationRunRecord>();
+    const run = createRun('page-progress', async (_batch, onProgress) => {
+      await onProgress?.([first]);
+      progressSent.resolve();
+      return remaining.promise;
+    });
+    const sendToContent = vi.fn(async () => undefined);
+    registry.activate(9, run);
+    const processing = processTranslationBatch(registry, 9, createBatchMessage(run.pageId), sendToContent);
+    await progressSent.promise;
+    expect(sendToContent).toHaveBeenCalledOnce();
+    expect(sendToContent).toHaveBeenLastCalledWith(9, expect.objectContaining({
+      type: 'INJECT_TRANSLATIONS', translations: [{ segmentId: 'segment-1', sentenceIndex: 0, translation: '你好' }],
+    }));
+    remaining.resolve([first, second]);
+    await processing;
+    expect(sendToContent).toHaveBeenCalledTimes(2);
+    expect(sendToContent).toHaveBeenLastCalledWith(9, expect.objectContaining({
+      translations: [{ segmentId: 'segment-2', sentenceIndex: 0, translation: '世界' }],
+    }));
+  });
+
+  it('ignores late progress after a replacement run starts', async () => {
+    const resume = deferred<void>();
+    const registry = new ActiveRunRegistry<TranslationRunRecord>();
+    const oldRun = createRun('page-progress-old', async (_batch, onProgress) => {
+      await resume.promise;
+      await onProgress?.([createTranslationResult()]);
+      return [createTranslationResult()];
+    });
+    const replacement = createRun('page-progress-new');
+    const sendToContent = vi.fn(async () => undefined);
+    registry.activate(9, oldRun);
+    const processing = processTranslationBatch(registry, 9, createBatchMessage(oldRun.pageId), sendToContent);
+    registry.activate(9, replacement);
+    resume.resolve();
+    await processing;
+    expect(sendToContent).not.toHaveBeenCalled();
+    expect(registry.get(9)).toBe(replacement);
+  });
+
+  it('reports a later failure so content can roll back translations already injected', async () => {
+    const registry = new ActiveRunRegistry<TranslationRunRecord>();
+    const run = createRun('page-progress-error', async (_batch, onProgress) => {
+      await onProgress?.([createTranslationResult()]);
+      throw new Error('later request failed');
+    });
+    const sendToContent = vi.fn(async () => undefined);
+    registry.activate(9, run);
+    await processTranslationBatch(registry, 9, createBatchMessage(run.pageId), sendToContent);
+    expect(sendToContent).toHaveBeenCalledTimes(2);
+    expect(sendToContent).toHaveBeenNthCalledWith(1, 9, expect.objectContaining({ type: 'INJECT_TRANSLATIONS' }));
+    expect(sendToContent).toHaveBeenNthCalledWith(2, 9, {
+      type: 'TRANSLATION_ERROR', pageId: run.pageId, error: 'later request failed',
+    });
+    expect(registry.get(9)).toBeUndefined();
+  });
+
   it('does not inject a completed result from a superseded run', async () => {
     const pending = deferred<TranslationResult[]>();
     const registry = new ActiveRunRegistry<TranslationRunRecord>();

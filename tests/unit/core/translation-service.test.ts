@@ -56,6 +56,101 @@ function createSentence(
 }
 
 describe('CachedTranslationService', () => {
+  it('publishes cached and completed sentences before the batch finishes, without exposing unfinished deltas', async () => {
+    const partialReached = deferred<void>();
+    const finishFirst = deferred<void>();
+    const firstPublished = deferred<void>();
+    const finishSecond = deferred<void>();
+    const onProgress = vi.fn(async (results) => {
+      if (results.some((result: { translation: string }) => result.translation === '第一句')) firstPublished.resolve();
+    });
+    const cacheSet = vi.fn(async () => {});
+    const translateBatch = vi.fn();
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: {
+        translateBatch,
+        async *translateBatchStream() {
+          yield { index: 0, delta: '第', done: false };
+          partialReached.resolve();
+          await finishFirst.promise;
+          yield { index: 0, delta: '一句', done: true };
+          await finishSecond.promise;
+          yield { index: 1, delta: '第二句', done: true };
+        },
+      },
+      cache: { get: async (text) => text === 'Cached.' ? '缓存' : null, set: cacheSet },
+      limiter: new RateLimiter(),
+    });
+    const run = service.translate({
+      sentences: [createSentence('Cached.', 2), createSentence('First.', 4), createSentence('Second.', 6)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    }, onProgress);
+    await partialReached.promise;
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress.mock.calls[0][0]).toEqual([expect.objectContaining({ sentenceIndex: 2, translation: '缓存', fromCache: true })]);
+    finishFirst.resolve();
+    await firstPublished.promise;
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.calls[1][0]).toEqual([expect.objectContaining({ segmentId: 'segment-4', sentenceIndex: 4, translation: '第一句' })]);
+    expect(cacheSet).not.toHaveBeenCalled();
+    finishSecond.resolve();
+    expect((await run).map((result) => result.translation)).toEqual(['缓存', '第一句', '第二句']);
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    expect(cacheSet).toHaveBeenCalledTimes(2);
+    expect(translateBatch).not.toHaveBeenCalled();
+  });
+
+  it('validates inline boundaries before publishing a completed translation', async () => {
+    const onProgress = vi.fn(async () => {});
+    const cacheSet = vi.fn(async () => {});
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: {
+        translateBatch: vi.fn(),
+        async *translateBatchStream() { yield { index: 0, delta: '阅读文档', done: true }; },
+      },
+      cache: { get: async () => null, set: cacheSet }, limiter: new RateLimiter(),
+    });
+    await expect(service.translate({
+      sentences: [createSentence(encodeInlineText(['Read ', 'documentation']), 0)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    }, onProgress)).rejects.toThrow('内联文本标记');
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(cacheSet).not.toHaveBeenCalled();
+  });
+
+  it('still rejects an incomplete batch after publishing an earlier valid result', async () => {
+    const onProgress = vi.fn(async () => {});
+    const cacheSet = vi.fn(async () => {});
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: {
+        translateBatch: vi.fn(),
+        async *translateBatchStream() { yield { index: 0, delta: '第一句', done: true }; },
+      },
+      cache: { get: async () => null, set: cacheSet }, limiter: new RateLimiter(),
+    });
+    await expect(service.translate({
+      sentences: [createSentence('First.', 0), createSentence('Second.', 1)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    }, onProgress)).rejects.toThrow('1/2 sentences missing');
+    expect(onProgress).toHaveBeenCalledOnce();
+    expect(cacheSet).not.toHaveBeenCalled();
+  });
+
+  it('stops before fetching misses when a cached-progress callback cancels the run', async () => {
+    const controller = new AbortController();
+    const translateBatch = vi.fn();
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch },
+      cache: { get: async (text) => text === 'Cached.' ? '缓存' : null, set: async () => {} },
+      limiter: new RateLimiter(), signal: controller.signal,
+    });
+    await expect(service.translate({
+      sentences: [createSentence('Cached.', 0), createSentence('Uncached.', 1)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    }, async () => { controller.abort(); })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(translateBatch).not.toHaveBeenCalled();
+  });
+
   it('does not cache a response that lost its inline text-node boundaries', async () => {
     const set = vi.fn(async () => {});
     const service = new CachedTranslationService(createSnapshot(), {
@@ -225,3 +320,9 @@ describe('CachedTranslationService', () => {
     })).rejects.toThrow('Translation response incomplete: 1/1 sentences missing or blank');
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((fulfill) => { resolve = fulfill; });
+  return { promise, resolve };
+}

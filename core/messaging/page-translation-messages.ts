@@ -2,6 +2,8 @@ import type {
   ExecuteTranslationMessage,
 } from './message-types';
 import type { Settings } from '../../shared/types';
+import { resolveActiveProvider } from '../../shared/provider-presets';
+import { isQwenMtModel } from '../../shared/provider-models';
 
 type TranslationLanguageOverrides = {
   sourceLang?: string;
@@ -13,6 +15,7 @@ export function createExecuteTranslationMessage(
   settings: Settings,
   overrides: TranslationLanguageOverrides = {},
 ): ExecuteTranslationMessage {
+  const provider = resolveActiveProvider(settings);
   return {
     type: 'EXECUTE_TRANSLATION',
     pageId,
@@ -24,6 +27,8 @@ export function createExecuteTranslationMessage(
     contextWindowSize: settings.contextWindowSize,
     translationColor: settings.translationColor,
     enableMutationObserver: settings.enableMutationObserver,
+    ...(provider.protocol === 'openai-compatible' && isQwenMtModel(provider.model)
+      ? { translateByParagraph: true } : {}),
   };
 }
 

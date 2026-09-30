@@ -15,7 +15,8 @@ export function getQwenMtRequestLimiter(
   let limiter = limiters.get(identity);
   if (!limiter) {
     limiter = new RateLimiter({
-      maxConcurrent: 1,
+      // Allow responses to overlap without increasing the request start rate.
+      maxConcurrent: 3,
       // 50 requests/minute leaves headroom below the model's 60 RPM / 1 RPS.
       minIntervalMs: 1200,
       minDelay429Ms: 10_000,

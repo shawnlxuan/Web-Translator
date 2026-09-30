@@ -49,6 +49,47 @@ describe('Qwen-MT physical request limits', () => {
     expect(starts).toEqual([0, 1200, 2400, 3600]);
   });
 
+  it('overlaps slow responses while maintaining start spacing and a three-request ceiling', async () => {
+    const starts: number[] = [];
+    let active = 0;
+    let peak = 0;
+    const fetcher: typeof fetch = vi.fn(async () => {
+      starts.push(Date.now());
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      active--;
+      return translated('译文');
+    });
+    const provider = new QwenMtProvider('overlap-slow-responses', endpoint, fetcher);
+    const runs = ['First', 'Second', 'Third', 'Fourth'].map((text) => provider.translateBatch(input(text)));
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(starts).toEqual([0, 1200, 2400]);
+    expect(peak).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toEqual([0, 1200, 2400, 5000]);
+    await vi.advanceTimersByTimeAsync(5000);
+    await Promise.all(runs);
+    expect(peak).toBe(3);
+    expect(active).toBe(0);
+  });
+
+  it('holds other pending requests through a cooldown without releasing them in a burst', async () => {
+    const starts: number[] = [];
+    const fetcher: typeof fetch = vi.fn(async () => {
+      starts.push(Date.now());
+      return starts.length === 1
+        ? new Response('limited', { status: 429, headers: { 'retry-after': '30' } })
+        : translated('译文');
+    });
+    const provider = new QwenMtProvider('overlap-cooldown', endpoint, fetcher);
+    const runs = ['First', 'Second', 'Third'].map((text) => provider.translateBatch(input(text)));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(starts).toEqual([0]);
+    await vi.advanceTimersByTimeAsync(2401);
+    await Promise.all(runs);
+    expect(starts).toEqual([0, 30_000, 31_200, 32_400]);
+  });
+
   it('retries only a failed inline fragment and honors a server cooldown beyond the local backoff cap', async () => {
     const contents: string[] = [];
     const starts: number[] = [];

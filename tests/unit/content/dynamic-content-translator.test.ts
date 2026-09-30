@@ -6,6 +6,18 @@ import type { ExtractedTextNode, Segment } from '../../../shared/types';
 import type { SegmentTranslationBuffer } from '../../../core/translation/segment-translation-buffer';
 
 describe('prepareDynamicContentTranslation', () => {
+  it('uses the same paragraph units for newly loaded native-MT content', () => {
+    const root = createElementNode();
+    const extractedNode = createExtractedNode('First sentence. Second sentence.', root);
+    const deps = createDeps({ extractedNodes: [extractedNode] });
+    prepareDynamicContentTranslation([root], {
+      pageState: TranslationState.COMPLETE, watcherActive: true, runId: 7, currentRunId: 7,
+      sourceLang: 'en', targetLang: 'zh-CN', batchSize: 4, contextWindowSize: 2,
+      existingNodes: [], translateByParagraph: true,
+    }, deps);
+    expect(deps.buildSegments).toHaveBeenCalledWith([extractedNode], 'en', true);
+  });
+
   it('builds serialized batches for new element roots while the page is complete', () => {
     const root = createElementNode();
     const extractedNode = createExtractedNode('New content', root);

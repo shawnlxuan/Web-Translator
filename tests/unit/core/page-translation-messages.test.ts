@@ -8,6 +8,19 @@ import {
 import { getDefaultSettings } from '../../../core/storage/defaults';
 
 describe('page translation messages', () => {
+  it('selects paragraph units only for native Qwen-MT profiles', () => {
+    const settings = getDefaultSettings();
+    settings.activeProviderId = 'builtin:qwen';
+    settings.providerProfiles = settings.providerProfiles.map((profile) => (
+      profile.id === 'builtin:qwen' ? { ...profile, model: 'qwen-mt-flash' } : profile
+    ));
+    expect(createExecuteTranslationMessage('mt-page', settings).translateByParagraph).toBe(true);
+    settings.providerProfiles = settings.providerProfiles.map((profile) => (
+      profile.id === 'builtin:qwen' ? { ...profile, model: 'qwen-plus' } : profile
+    ));
+    expect(createExecuteTranslationMessage('chat-page', settings).translateByParagraph).toBeUndefined();
+  });
+
   it('copies fixed run settings into EXECUTE_TRANSLATION', () => {
     const settings = {
       ...getDefaultSettings(),

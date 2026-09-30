@@ -6,9 +6,10 @@ import type {
 import type { ActiveRunRegistry } from '../../core/translation/active-run-registry';
 import { getRuntimeMessageError } from '../../core/messaging/page-translation-messages';
 import type { TranslationBatch, TranslationResult } from '../../shared/types';
+import type { TranslationProgressCallback } from '../../core/translation/translation-service';
 
 interface TranslationServiceLike {
-  translate(batch: TranslationBatch): Promise<TranslationResult[]>;
+  translate(batch: TranslationBatch, onProgress?: TranslationProgressCallback): Promise<TranslationResult[]>;
 }
 
 export interface TranslationRunRecord {
@@ -34,23 +35,34 @@ export async function processTranslationBatch(
     throw new Error(`Translation run expired: ${message.pageId}`);
   }
 
-  try {
-    const translations = await run.service.translate({
-      sentences: message.batch,
-      sourceLang: message.sourceLang,
-      targetLang: message.targetLang,
-    });
+  const delivered = new Set<string>();
+  const deliver: TranslationProgressCallback = async (translations) => {
     if (!registry.isCurrent(tabId, run)) return;
-
-    await sendToContent(tabId, {
+    const fresh = translations.filter((translation) => (
+      !delivered.has(JSON.stringify([translation.segmentId, translation.sentenceIndex]))
+    ));
+    if (fresh.length === 0) return;
+    const response = await sendToContent(tabId, {
       type: 'INJECT_TRANSLATIONS',
       pageId: run.pageId,
-      translations: translations.map((translation) => ({
+      translations: fresh.map((translation) => ({
         segmentId: translation.segmentId,
         sentenceIndex: translation.sentenceIndex,
         translation: translation.translation,
       })),
     });
+    const error = getRuntimeMessageError(response);
+    if (error) throw new Error(error);
+    fresh.forEach((translation) => delivered.add(JSON.stringify([translation.segmentId, translation.sentenceIndex])));
+  };
+
+  try {
+    const translations = await run.service.translate({
+      sentences: message.batch,
+      sourceLang: message.sourceLang,
+      targetLang: message.targetLang,
+    }, deliver);
+    await deliver(translations);
   } catch (error) {
     if (!registry.isCurrent(tabId, run)) return;
 

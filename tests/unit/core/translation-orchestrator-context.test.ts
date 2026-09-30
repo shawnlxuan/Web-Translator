@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createBatches: vi.fn(() => []),
   resetContextCache: vi.fn(),
+  buildSegments: vi.fn(() => []),
 }));
 
 vi.mock('../../../entrypoints/content/dom/text-extractor', () => ({
   extractTextNodes: () => [],
 }));
 vi.mock('../../../entrypoints/content/dom/segment-builder', () => ({
-  buildSegments: () => [],
+  buildSegments: mocks.buildSegments,
 }));
 vi.mock('../../../core/translation/batch-manager', () => ({
   createBatches: mocks.createBatches,
@@ -28,6 +29,7 @@ describe('runExtractionPipeline context lifecycle', () => {
   beforeEach(() => {
     mocks.createBatches.mockClear();
     mocks.resetContextCache.mockClear();
+    mocks.buildSegments.mockClear();
   });
 
   it('resets cached page context for every new extraction run', () => {
@@ -46,5 +48,10 @@ describe('runExtractionPipeline context lifecycle', () => {
       targetLang: 'zh-CN',
       contextWindowSize: 2,
     });
+  });
+
+  it('passes native-MT paragraph mode into segment construction', () => {
+    runExtractionPipeline('zh-CN', 'en', 8, 2, true);
+    expect(mocks.buildSegments).toHaveBeenCalledWith([], 'en', true);
   });
 });
