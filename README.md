@@ -11,17 +11,11 @@
 
 ## 安装与使用
 
-准备 Node.js 22+ 和 pnpm 9+，在项目目录执行：
-
-```bash
-pnpm install
-pnpm build
-```
-
-1. 打开 Chrome 的 `chrome://extensions`，启用“开发者模式”。
-2. 点击“加载已解压的扩展程序”，选择 `.output/chrome-mv3` 目录。
-3. 在扩展设置中选择 API 提供商，填写密钥、接口地址和模型，设置目标语言并保存。
-4. 点击扩展图标或网页浮动按钮开始翻译，也可选中文字后使用划词浮标或右键菜单。
+1. 从 [Releases](https://github.com/shawnlxuan/Web-Translator/releases/latest) 下载 `Web-Translator-1.0.1-chrome-mv3.zip` 并解压，无需安装 Node.js 或自行编译。
+2. 打开 Chrome 的 `chrome://extensions`，启用“开发者模式”。
+3. 点击“加载已解压的扩展程序”，选择解压后的 `chrome-mv3` 目录。
+4. 在扩展设置中选择 API 提供商，填写密钥、接口地址和模型，设置目标语言并保存。
+5. 点击扩展图标或网页浮动按钮开始翻译，也可选中文字后使用划词浮标或右键菜单。
 
 API 密钥保存在浏览器本地；翻译需要可用的 API 服务。
 
@@ -34,10 +28,16 @@ API 密钥保存在浏览器本地；翻译需要可用的 API 服务。
 | `Alt+Shift+T` | 翻译所选文本 |
 | `Ctrl+Enter` / `Cmd+Enter` | 提交弹窗中的文本翻译 |
 
-## 开发检查
+## 本地构建与开发检查
+
+准备 Node.js 22+ 和 pnpm 9+，在项目目录执行：
 
 ```bash
+pnpm install
+pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
 ```
+
+从源码构建时，加载扩展的目录为 `.output/chrome-mv3`。
