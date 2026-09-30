@@ -62,7 +62,7 @@ describe('official provider presets', () => {
       },
       deepseek: {
         protocol: 'openai-compatible',
-        endpoint: 'https://api.deepseek.com/v1',
+        endpoint: 'https://api.deepseek.com',
         model: 'deepseek-v4-flash',
       },
       glm: {
@@ -72,7 +72,7 @@ describe('official provider presets', () => {
       },
       qwen: {
         protocol: 'openai-compatible',
-        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        endpoint: 'https://maas.qianwenaiapi.com/compatible-mode/v1',
         model: 'qwen-plus',
       },
       kimi: {
@@ -87,7 +87,7 @@ describe('official provider presets', () => {
       },
       minimax: {
         protocol: 'openai-compatible',
-        endpoint: 'https://api.minimaxi.com/v1',
+        endpoint: 'https://api.minimax.cn/v1',
         model: 'MiniMax-M3',
       },
     });
@@ -95,7 +95,7 @@ describe('official provider presets', () => {
 
   it('records current verification and real documentation links', () => {
     for (const preset of Object.values(PROVIDER_PRESETS)) {
-      expect(preset.verifiedAt).toBe('2026-07-17');
+      expect(preset.verifiedAt).toBe('2026-09-30');
       expect(() => new URL(preset.docsUrl)).not.toThrow();
       expect(new URL(preset.docsUrl).protocol).toBe('https:');
     }
@@ -146,6 +146,19 @@ describe('provider profile helpers', () => {
       'https://gateway.example.com/v1/chat/completions',
       'openai-compatible',
     )).toThrow(/根地址/);
+  });
+
+  it('rejects Qwen Anthropic endpoints in OpenAI-compatible profiles and keeps protocols distinct', () => {
+    const endpoint = 'https://maas.qianwenaiapi.com/apps/anthropic/';
+    expect(() => helpers.validateProviderEndpoint(endpoint, 'openai-compatible')).toThrow('Anthropic 协议');
+    expect(() => helpers.validateProviderEndpoint(
+      'https://token-plan.maas.qianwenaiapi.com/apps/anthropic', 'openai-compatible',
+    )).toThrow('Anthropic 协议');
+    expect(helpers.buildProviderEndpointUrl(endpoint, 'v1/messages', 'anthropic'))
+      .toBe('https://maas.qianwenaiapi.com/apps/anthropic/v1/messages');
+    expect(helpers.buildProviderEndpointUrl(
+      PROVIDER_PRESETS.qwen.endpoint, 'chat/completions', 'openai-compatible',
+    )).toBe('https://maas.qianwenaiapi.com/compatible-mode/v1/chat/completions');
   });
 
   it('finds profiles and resolves an invalid active id to OpenAI', () => {

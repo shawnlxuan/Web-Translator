@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProviderId, ProviderProfile, Settings } from '../../../shared/types';
+import { isQwenMtModel } from '../../../shared/provider-models';
 import {
   createCustomProviderProfile,
   normalizeEndpoint,
@@ -304,6 +305,10 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
               {models.map((model) => <option key={model} value={model} />)}
             </datalist>
           </label>
+
+          {selected.protocol === 'openai-compatible' && isQwenMtModel(selected.model) && (
+            <p className="form-hint">Qwen-MT 使用专用翻译模式，不应用自定义提示词或上下文设置。</p>
+          )}
 
           <div className="connection-actions">
             <button className="test-btn" disabled={testing || fetchingModels} onClick={() => void testConnection()}>

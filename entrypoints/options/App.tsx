@@ -65,7 +65,7 @@ const App: React.FC = () => {
       <PromptSettings settings={settings} onSave={savePartial} />
       <AdvancedSettings settings={settings} onSave={savePartial} />
 
-      <footer className="app-footer">网页翻译 v1.0.1</footer>
+      <footer className="app-footer">网页翻译 v1.0.2</footer>
     </main>
   );
 };

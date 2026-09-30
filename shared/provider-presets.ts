@@ -30,8 +30,8 @@ export const PROVIDER_PRESETS = {
     protocol: 'openai-compatible',
     endpoint: 'https://api.openai.com/v1',
     model: 'gpt-4o',
-    docsUrl: 'https://platform.openai.com/docs/api-reference',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://developers.openai.com/api/reference/overview',
+    verifiedAt: '2026-09-30',
   },
   anthropic: {
     id: 'anthropic',
@@ -39,17 +39,17 @@ export const PROVIDER_PRESETS = {
     protocol: 'anthropic',
     endpoint: 'https://api.anthropic.com',
     model: 'claude-sonnet-4-6',
-    docsUrl: 'https://docs.anthropic.com/en/api/getting-started',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://platform.claude.com/docs/en/api/overview',
+    verifiedAt: '2026-09-30',
   },
   deepseek: {
     id: 'deepseek',
     name: 'DeepSeek',
     protocol: 'openai-compatible',
-    endpoint: 'https://api.deepseek.com/v1',
+    endpoint: 'https://api.deepseek.com',
     model: 'deepseek-v4-flash',
-    docsUrl: 'https://api-docs.deepseek.com/',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://api-docs.deepseek.com/zh-cn/',
+    verifiedAt: '2026-09-30',
   },
   glm: {
     id: 'glm',
@@ -58,16 +58,16 @@ export const PROVIDER_PRESETS = {
     endpoint: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-5.2',
     docsUrl: 'https://docs.bigmodel.cn/cn/guide/develop/http/introduction',
-    verifiedAt: '2026-07-17',
+    verifiedAt: '2026-09-30',
   },
   qwen: {
     id: 'qwen',
     name: 'Qwen',
     protocol: 'openai-compatible',
-    endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    endpoint: 'https://maas.qianwenaiapi.com/compatible-mode/v1',
     model: 'qwen-plus',
-    docsUrl: 'https://help.aliyun.com/zh/model-studio/developer-reference/compatibility-of-openai-with-dashscope',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://platform.qianwenai.com/docs/developer-guides/getting-started/first-api-call',
+    verifiedAt: '2026-09-30',
   },
   kimi: {
     id: 'kimi',
@@ -75,8 +75,8 @@ export const PROVIDER_PRESETS = {
     protocol: 'openai-compatible',
     endpoint: 'https://api.moonshot.cn/v1',
     model: 'kimi-k2.6',
-    docsUrl: 'https://platform.moonshot.cn/docs/guide/start-using-kimi-api',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://platform.kimi.com/docs/get-api-key',
+    verifiedAt: '2026-09-30',
   },
   mimo: {
     id: 'mimo',
@@ -84,17 +84,17 @@ export const PROVIDER_PRESETS = {
     protocol: 'openai-compatible',
     endpoint: 'https://api.xiaomimimo.com/v1',
     model: 'mimo-v2-flash',
-    docsUrl: 'https://platform.xiaomimimo.com/#/docs/api',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://mimo.mi.com/docs/zh-CN/quick-start/summary/first-api-call',
+    verifiedAt: '2026-09-30',
   },
   minimax: {
     id: 'minimax',
     name: 'MiniMax',
     protocol: 'openai-compatible',
-    endpoint: 'https://api.minimaxi.com/v1',
+    endpoint: 'https://api.minimax.cn/v1',
     model: 'MiniMax-M3',
-    docsUrl: 'https://platform.minimaxi.com/docs/api-reference/text-openai-api',
-    verifiedAt: '2026-07-17',
+    docsUrl: 'https://platform.minimax.cn/docs/api-reference/text-openai-api',
+    verifiedAt: '2026-09-30',
   },
 } as const satisfies Record<BuiltinProviderType, ProviderPreset>;
 
@@ -162,6 +162,13 @@ export function validateProviderEndpoint(
   }
 
   const path = url.pathname.replace(/\/+$/, '').toLowerCase();
+  if (
+    protocol === 'openai-compatible'
+    && (url.hostname === 'maas.qianwenaiapi.com' || url.hostname.endsWith('.maas.qianwenaiapi.com'))
+    && path.endsWith('/apps/anthropic')
+  ) {
+    throw new Error('该千问地址使用 Anthropic 协议。请在当前配置中填写 OpenAI 兼容地址，以 /compatible-mode/v1 结尾。');
+  }
   if (path.endsWith('/chat/completions')) {
     throw new Error('接口地址应填写 API 根地址，不要包含 /chat/completions。');
   }

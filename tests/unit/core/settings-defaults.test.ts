@@ -87,6 +87,19 @@ describe('sanitizeSettings provider profiles', () => {
     });
   });
 
+  it('preserves saved regional endpoints, keys and models when official presets change', () => {
+    const profiles = [
+      { id: 'builtin:qwen', apiKey: 'qwen-key', endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-mt-flash' },
+      { id: 'builtin:minimax', apiKey: 'minimax-key', endpoint: 'https://api.minimaxi.com/v1', model: 'MiniMax-M3' },
+      { id: 'builtin:deepseek', apiKey: 'deepseek-key', endpoint: 'https://api.deepseek.com/v1', model: 'private-model' },
+    ];
+    const settings = sanitizeSettings({ settingsVersion: 2, activeProviderId: 'builtin:qwen', providerProfiles: profiles });
+    for (const profile of profiles) {
+      expect(settings.providerProfiles.find(({ id }) => id === profile.id)).toMatchObject(profile);
+    }
+    expect(settings.activeProviderId).toBe('builtin:qwen');
+  });
+
   it('keeps only valid custom profiles with unique normalized names', () => {
     const settings = sanitizeSettings({
       settingsVersion: 2,
@@ -303,7 +316,7 @@ describe('sanitizeSettings provider profiles', () => {
     });
 
     expect(migratedDefaults.providerProfiles.find(({ id }) => id === 'builtin:minimax')).toMatchObject({
-      endpoint: 'https://api.minimaxi.com/v1',
+      endpoint: 'https://api.minimax.cn/v1',
       model: 'MiniMax-M3',
     });
     expect(migratedOverride.providerProfiles.find(({ id }) => id === 'builtin:minimax')).toMatchObject({

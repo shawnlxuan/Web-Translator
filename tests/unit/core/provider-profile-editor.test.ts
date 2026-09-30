@@ -53,7 +53,7 @@ describe('provider profile editor', () => {
 
     expect(resetBuiltinProfile(edited)).toMatchObject({
       apiKey: 'saved-key',
-      endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      endpoint: 'https://maas.qianwenaiapi.com/compatible-mode/v1',
       model: 'qwen-plus',
     });
     expect(() => resetBuiltinProfile(custom)).toThrow(/custom/i);
