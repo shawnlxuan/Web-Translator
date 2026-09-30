@@ -48,10 +48,14 @@ export interface StreamDelta {
 
 /** Error from an LLM provider */
 export class ProviderError extends Error {
+  /** The individual HTTP request has already exhausted its retry policy. */
+  retryHandled = false;
+
   constructor(
     public provider: string,
     public statusCode: number,
     public details: unknown,
+    public retryAfterMs?: number,
   ) {
     const detailText = typeof details === 'string'
       ? details

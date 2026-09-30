@@ -14,6 +14,7 @@ export interface ProviderFetchOptions {
 export class ProviderNetworkError extends Error {
   readonly statusCode = 0;
   readonly isNetworkError = true;
+  retryHandled = false;
 
   constructor(
     providerName: string,
@@ -111,7 +112,21 @@ export async function createProviderErrorFromResponse(
     providerName,
     response.status,
     sanitizeProviderErrorDetails(body || response.statusText),
+    parseRetryAfter(response.headers.get('retry-after')),
   );
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value?.trim()) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const milliseconds = Number(trimmed) * 1000;
+    return Number.isFinite(milliseconds) ? milliseconds : undefined;
+  }
+  // An HTTP-date uses GMT; do not interpret arbitrary strings as local dates.
+  if (!trimmed.endsWith('GMT')) return undefined;
+  const timestamp = Date.parse(trimmed);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
 export function isRetryableNetworkError(error: unknown): boolean {

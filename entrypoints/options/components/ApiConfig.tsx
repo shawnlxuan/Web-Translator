@@ -307,7 +307,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
           </label>
 
           {selected.protocol === 'openai-compatible' && isQwenMtModel(selected.model) && (
-            <p className="form-hint">Qwen-MT 使用专用翻译模式，不应用自定义提示词或上下文设置。</p>
+            <p className="form-hint">Qwen-MT 请求自动排队，每次至少间隔 1.2 秒；遇到限流会等待后重试。不应用自定义提示词或上下文设置。</p>
           )}
 
           <div className="connection-actions">

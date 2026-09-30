@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QwenMtProvider } from '../../../core/api/qwen-mt-provider';
+import { RateLimiter } from '../../../core/api/rate-limiter';
 import type { TranslationRequest } from '../../../core/api/provider-interface';
 import { decodeInlineText, encodeInlineText } from '../../../core/translation/inline-markup';
 import { TextType } from '../../../shared/types';
 import { SUPPORTED_LANGUAGES } from '../../../shared/constants';
+
+function createMtProvider(apiKey: string, baseUrl: string, fetcher: typeof fetch): QwenMtProvider {
+  return new QwenMtProvider(apiKey, baseUrl, fetcher, new RateLimiter({
+    maxConcurrent: 1, maxRetries429: 0, maxRetries5xx: 0, maxRetriesNetwork: 0,
+  }));
+}
 
 const endpoint = 'https://maas.qianwenaiapi.com/compatible-mode/v1';
 const request: TranslationRequest = {
@@ -41,7 +48,7 @@ describe('Qwen-MT native translation', () => {
       });
       return json('你好');
     });
-    const provider = new QwenMtProvider('secret', `${endpoint}?route=mt`, fetcher);
+    const provider = createMtProvider('secret', `${endpoint}?route=mt`, fetcher);
     expect(await provider.translateBatch({ ...request, customPromptTemplate: 'Never send this as source.' }))
       .toEqual({ translations: [{ index: 0, text: '你好' }] });
   });
@@ -58,7 +65,7 @@ describe('Qwen-MT native translation', () => {
     const input = withTexts('First', 'Second');
     input.sentences[0].index = 3;
     input.sentences[1].index = 7;
-    const result = await new QwenMtProvider('key', endpoint, fetcher).translateBatch(input);
+    const result = await createMtProvider('key', endpoint, fetcher).translateBatch(input);
     expect(result.translations).toEqual([{ index: 3, text: '[#1] 第一' }, { index: 7, text: '第二' }]);
     expect(peak).toBe(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -72,7 +79,7 @@ describe('Qwen-MT native translation', () => {
       return json(text === 'Hello' ? '你好' : '世界');
     });
     const source = encodeInlineText([' Hello ', 'world', ' \n', '!']);
-    const result = await new QwenMtProvider('key', endpoint, fetcher).translateBatch(withTexts(source));
+    const result = await createMtProvider('key', endpoint, fetcher).translateBatch(withTexts(source));
     expect(contents).toEqual(['Hello', 'world']);
     expect(decodeInlineText(result.translations[0].text, 4)).toEqual([' 你好 ', '世界', ' \n', '!']);
   });
@@ -85,7 +92,7 @@ describe('Qwen-MT native translation', () => {
       expect(options.target_lang).not.toBe('auto');
       return json('Translated');
     });
-    const provider = new QwenMtProvider('key', endpoint, fetcher);
+    const provider = createMtProvider('key', endpoint, fetcher);
     for (const language of SUPPORTED_LANGUAGES.filter(({ code }) => code !== 'auto')) {
       await provider.translateBatch({ ...request, sourceLang: 'en', targetLang: language.code });
     }
@@ -97,7 +104,7 @@ describe('Qwen-MT native translation', () => {
 
   it.each(['auto', 'unknown'])('rejects invalid target language %s before making a request', async (targetLang) => {
     const fetcher = vi.fn();
-    await expect(new QwenMtProvider('key', endpoint, fetcher).translateBatch({ ...request, targetLang }))
+    await expect(createMtProvider('key', endpoint, fetcher).translateBatch({ ...request, targetLang }))
       .rejects.toThrow('目标语言');
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -110,7 +117,7 @@ describe('Qwen-MT native translation', () => {
       });
       return json('你好');
     });
-    await new QwenMtProvider('key', endpoint, fetcher).testConnection('qwen-mt-turbo');
+    await createMtProvider('key', endpoint, fetcher).testConnection('qwen-mt-turbo');
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
@@ -121,7 +128,7 @@ describe('Qwen-MT native translation', () => {
     ['API error', () => new Response('{"error":{"message":"Invalid language"}}'), 'Invalid language'],
     ['HTTP 400', () => new Response('invalid_parameter_error', { status: 400 }), 'Qwen-MT 请求失败（HTTP 400）'],
   ] as const)('rejects %s responses', async (_name, response, message) => {
-    await expect(new QwenMtProvider('key', endpoint, async () => response()).translateBatch(request))
+    await expect(createMtProvider('key', endpoint, async () => response()).translateBatch(request))
       .rejects.toThrow(message);
   });
 
@@ -131,7 +138,7 @@ describe('Qwen-MT native translation', () => {
       controller.abort();
       return json('你好');
     });
-    await expect(new QwenMtProvider('key', endpoint, fetcher).translateBatch({
+    await expect(createMtProvider('key', endpoint, fetcher).translateBatch({
       ...withTexts(encodeInlineText(['Hello', 'world']), 'Second'), signal: controller.signal,
     })).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetcher).toHaveBeenCalledOnce();
@@ -141,7 +148,7 @@ describe('Qwen-MT native translation', () => {
     const controller = new AbortController();
     controller.abort();
     const fetcher = vi.fn();
-    await expect(new QwenMtProvider('key', endpoint, fetcher).translateBatch({ ...request, signal: controller.signal }))
+    await expect(createMtProvider('key', endpoint, fetcher).translateBatch({ ...request, signal: controller.signal }))
       .rejects.toMatchObject({ name: 'AbortError' });
     expect(fetcher).not.toHaveBeenCalled();
   });

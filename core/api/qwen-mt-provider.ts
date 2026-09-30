@@ -1,6 +1,9 @@
 import type { LLMProvider, TranslationRequest, TranslationResponse, StreamDelta } from './provider-interface';
-import { createProviderErrorFromResponse, fetchProviderResponse } from './http-client';
+import { createProviderErrorFromResponse, fetchProviderResponse, ProviderNetworkError } from './http-client';
+import { ProviderError } from './provider-interface';
 import { extractOpenAIContent } from './openai-response';
+import { getQwenMtRequestLimiter } from './qwen-mt-request-limiter';
+import type { RateLimiter } from './rate-limiter';
 import { decodeInlineText, encodeInlineText, getInlineTextCount } from '../translation/inline-markup';
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -32,6 +35,7 @@ export class QwenMtProvider implements LLMProvider {
     private apiKey: string,
     private baseUrl: string,
     private fetcher: typeof fetch = fetch,
+    private requestLimiter?: RateLimiter,
   ) {}
 
   async translateBatch(request: TranslationRequest): Promise<TranslationResponse> {
@@ -80,6 +84,29 @@ export class QwenMtProvider implements LLMProvider {
   }
 
   private async translateText(
+    text: string,
+    model: string,
+    sourceLang: string,
+    targetLang: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const limiter = this.requestLimiter ?? getQwenMtRequestLimiter(this.baseUrl, this.apiKey, model);
+    try {
+      return await limiter.execute(
+        () => this.requestTranslation(text, model, sourceLang, targetLang, timeoutMs, signal),
+        signal,
+      );
+    } catch (error) {
+      if (error instanceof ProviderError || error instanceof ProviderNetworkError) {
+        // The outer batch limiter must not replay fragments that already succeeded.
+        error.retryHandled = true;
+      }
+      throw error;
+    }
+  }
+
+  private async requestTranslation(
     text: string,
     model: string,
     sourceLang: string,

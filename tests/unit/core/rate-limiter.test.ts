@@ -78,6 +78,44 @@ describe('RateLimiter', () => {
     expect(peak).toBe(1);
   });
 
+  it('runs activity hooks only while waiting through a long request cooldown', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const activity = vi.fn(async () => {});
+    const limiter = new RateLimiter({ maxConcurrent: 1, minIntervalMs: 1200, onWait: activity });
+    const operation = vi.fn()
+      .mockRejectedValueOnce({ statusCode: 429, retryAfterMs: 60_000 })
+      .mockResolvedValue('done');
+    const run = limiter.execute(operation);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(activity).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(run).resolves.toBe('done');
+    expect(operation).toHaveBeenCalledTimes(2);
+    expect(activity).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(activity).toHaveBeenCalledTimes(4);
+  });
+
+  it('stops cooldown activity immediately when cancelled', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const activity = vi.fn(async () => {});
+    const controller = new AbortController();
+    const limiter = new RateLimiter({ maxConcurrent: 1, minIntervalMs: 1200, onWait: activity });
+    const operation = vi.fn(async () => { throw { statusCode: 429, retryAfterMs: 60_000 }; });
+    const run = limiter.execute(operation, controller.signal);
+    const rejection = expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(activity).toHaveBeenCalledTimes(2);
+    controller.abort();
+    await rejection;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(activity).toHaveBeenCalledTimes(2);
+    expect(operation).toHaveBeenCalledOnce();
+  });
+
   it('releases a permit when an operation throws', async () => {
     const limiter = new RateLimiter({ maxConcurrent: 1 });
     const gate = deferred();

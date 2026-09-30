@@ -18,6 +18,12 @@ export interface RateLimiterConfig {
   baseDelayMs: number;
   /** Maximum delay cap (ms) */
   maxDelayMs: number;
+  /** Minimum interval between actual operation starts, including retries (ms). */
+  minIntervalMs: number;
+  /** Minimum backoff for 429 responses (ms). */
+  minDelay429Ms: number;
+  /** Optional activity hook while a request waits through a long cooldown. */
+  onWait?: () => Promise<void>;
 }
 
 const DEFAULT_CONFIG: RateLimiterConfig = {
@@ -27,6 +33,8 @@ const DEFAULT_CONFIG: RateLimiterConfig = {
   maxRetriesNetwork: 1,
   baseDelayMs: 1000,
   maxDelayMs: 30000,
+  minIntervalMs: 0,
+  minDelay429Ms: 0,
 };
 
 /**
@@ -34,6 +42,8 @@ const DEFAULT_CONFIG: RateLimiterConfig = {
  */
 export class RateLimiter {
   private running = 0;
+  private nextStartAt = 0;
+  private cooldownUntil = 0;
   private queue: Array<{
     resolve: () => void;
     reject: (error: unknown) => void;
@@ -98,24 +108,63 @@ export class RateLimiter {
     try {
       while (true) {
         signal?.throwIfAborted();
+        await this.waitForStart(signal);
+        signal?.throwIfAborted();
         try {
           return await fn();
         } catch (error: unknown) {
           signal?.throwIfAborted();
           const category = this.getRetryCategory(error);
-          if (!category || !this.shouldRetry(category, retries)) throw error;
+          if (!category) throw error;
 
           const attempt = retries[category];
-          const delay = this.calculateDelay(category, attempt);
+          const retryAfterMs = (error as { retryAfterMs?: unknown }).retryAfterMs;
+          const delay = Math.max(
+            this.calculateDelay(category, attempt),
+            typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)
+              ? Math.max(0, retryAfterMs) : 0,
+          );
+          if (category === 'rateLimit' && this.config.minIntervalMs > 0) {
+            // Paced HTTP queues share cooldown even if the failed request is
+            // cancelled or has exhausted its retry budget. A batch semaphore
+            // without pacing may serve unrelated provider accounts.
+            this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + delay);
+          }
+          if (!this.shouldRetry(category, retries)) throw error;
           console.warn(
             `[RateLimiter] Retry ${attempt + 1} after ${delay}ms (${category})`,
           );
-          await sleep(delay, signal);
+          await this.wait(delay, signal);
           retries[category]++;
         }
       }
     } finally {
       this.release();
+    }
+  }
+
+  private async waitForStart(signal?: AbortSignal): Promise<void> {
+    while (true) {
+      signal?.throwIfAborted();
+      const delay = Math.max(this.nextStartAt, this.cooldownUntil) - Date.now();
+      if (delay <= 0) {
+        this.nextStartAt = Date.now() + this.config.minIntervalMs;
+        return;
+      }
+      await this.wait(delay, signal);
+    }
+  }
+
+  private async wait(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!this.config.onWait || ms < 15_000) return sleep(ms, signal);
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      signal?.throwIfAborted();
+      // Activity is scoped to this pending request, with no permanent interval.
+      await this.config.onWait().catch(() => {});
+      signal?.throwIfAborted();
+      const remaining = deadline - Date.now();
+      if (remaining > 0) await sleep(Math.min(remaining, 15_000), signal);
     }
   }
 
@@ -135,6 +184,9 @@ export class RateLimiter {
   private getRetryCategory(
     error: unknown,
   ): 'rateLimit' | 'server' | 'network' | null {
+    if (typeof error === 'object' && error !== null && (error as { retryHandled?: boolean }).retryHandled) {
+      return null;
+    }
     if (isRetryableNetworkError(error)) return 'network';
     if (typeof error !== 'object' || error === null) return null;
     const candidate = error as { statusCode?: unknown; status?: unknown };
@@ -166,7 +218,7 @@ export class RateLimiter {
     retries: number,
   ): number {
     const base = category === 'rateLimit'
-      ? this.config.baseDelayMs * 2 // More aggressive backoff for 429
+      ? Math.max(this.config.baseDelayMs * 2, this.config.minDelay429Ms)
       : this.config.baseDelayMs;
 
     // Exponential backoff with jitter
@@ -183,7 +235,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
-    }, ms);
+    }, Math.min(ms, 2_147_483_647));
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
