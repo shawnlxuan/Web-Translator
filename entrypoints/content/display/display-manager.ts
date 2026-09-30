@@ -9,6 +9,7 @@ import {
   DATA_SEGMENT_ATTR,
   DATA_TRANSLATED_ATTR,
 } from '../../../shared/constants';
+import { decodeInlineText, stripInlineText } from '../../../core/translation/inline-markup';
 
 export interface TranslationEntry {
   blockElement: Element;
@@ -18,6 +19,9 @@ export interface TranslationEntry {
   translation: string;
   segmentId: string;
   translationElement: Element | null;
+  nodeTranslations: string[];
+  writtenTexts: Array<string | null>;
+  invalidated: boolean;
 }
 
 type BilingualPlacement = 'inline-right' | 'table' | 'compact' | 'block';
@@ -65,17 +69,24 @@ export class DisplayManager {
     this.removeLoadingIndicator(segmentId);
 
     const originalTexts = textNodes.map((node) => node.textContent || '');
-    const originalText = originalTexts.join(' ');
-    if (isEffectivelyUnchangedTranslation(originalText, trimmedTranslation)) return;
+    const originalText = originalTexts.join('');
+    const nodeTranslations = textNodes.length > 1
+      ? decodeInlineText(trimmedTranslation, textNodes.length)
+      : [trimmedTranslation];
+    if (!nodeTranslations) throw new Error('译文缺少内联文本标记，已保留网页原文。');
+    if (isEffectivelyUnchangedTranslation(originalText, stripInlineText(trimmedTranslation))) return;
 
     const entry: TranslationEntry = {
       blockElement,
       textNodes,
       originalTexts,
       originalText,
-      translation: trimmedTranslation,
+      translation: stripInlineText(trimmedTranslation),
       segmentId,
       translationElement: null,
+      nodeTranslations,
+      writtenTexts: textNodes.map(() => null),
+      invalidated: false,
     };
 
     this.entries.push(entry);
@@ -145,8 +156,10 @@ export class DisplayManager {
     for (const entry of this.entries) {
       this.removeRenderedTranslation(entry);
       this.restoreOriginalText(entry);
-      this.renderEntry(entry);
+      if (entry.invalidated) this.clearEntryAttributes(entry);
+      else this.renderEntry(entry);
     }
+    this.entries = this.entries.filter((entry) => !entry.invalidated);
   }
 
   getMode(): DisplayMode {
@@ -220,9 +233,15 @@ export class DisplayManager {
   }
 
   private renderReplace(entry: TranslationEntry): void {
-    this.restoreOriginalText(entry);
     entry.textNodes.forEach((node, index) => {
-      node.textContent = index === 0 ? entry.translation : '';
+      const original = entry.originalTexts[index];
+      const leading = original.match(/^\s*/)?.[0] ?? '';
+      const trailing = original.match(/\s*$/)?.[0] ?? '';
+      const value = original.trim()
+        ? `${leading}${entry.nodeTranslations[index].trim()}${trailing}`
+        : entry.nodeTranslations[index] || original;
+      node.textContent = value;
+      entry.writtenTexts[index] = value;
     });
     entry.blockElement.classList.add(`${CSS_PREFIX}translated`);
   }
@@ -243,7 +262,11 @@ export class DisplayManager {
 
   private restoreOriginalText(entry: TranslationEntry): void {
     entry.textNodes.forEach((node, index) => {
-      node.textContent = entry.originalTexts[index] || '';
+      const written = entry.writtenTexts[index];
+      const expected = written ?? entry.originalTexts[index];
+      if (node.textContent !== expected) entry.invalidated = true;
+      else if (written !== null) node.textContent = entry.originalTexts[index];
+      entry.writtenTexts[index] = null;
     });
   }
 

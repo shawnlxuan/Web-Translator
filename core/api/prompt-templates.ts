@@ -63,6 +63,7 @@ export function buildBatchPrompt(
   parts.push(`Translate each of the following sentences from ${sourceName} to ${targetName}.`);
   parts.push('Preserve the numbering. Return ONLY the translations.');
   parts.push('Do not include element labels such as [link], [heading], or [button] in the output.');
+  parts.push('Preserve every [[TR:n]]...[[/TR:n]] text-node marker exactly, including its number and order. Translate the text inside each pair in the context of the whole paragraph; never omit a pair or move text outside the markers.');
   parts.push('');
 
   for (const s of sentences) {
@@ -231,14 +232,12 @@ function buildBatchContextLines(context: SegmentContext): string[] {
   }
 
   const before = context.beforeSentences
-    .slice(-2)
     .map((text) => truncateText(text, 120));
   if (before.length > 0) {
     lines.push(`Before: ${before.join(' / ')}`);
   }
 
   const after = context.afterSentences
-    .slice(0, 2)
     .map((text) => truncateText(text, 120));
   if (after.length > 0) {
     lines.push(`After: ${after.join(' / ')}`);

@@ -6,6 +6,26 @@ import {
 } from '../../../core/api/http-client';
 
 describe('provider HTTP client', () => {
+  it('times out a stalled response body after headers have arrived', async () => {
+    vi.useFakeTimers();
+    const response = await fetchProviderResponse('https://example.com/v1', 'chat/completions', 'openai-compatible', {}, {
+      providerName: 'Test', timeoutMs: 100,
+      fetcher: async () => new Response(new ReadableStream({ start() {} })),
+    });
+    const rejection = expect(response.text()).rejects.toMatchObject({ name: 'ProviderNetworkError', reason: 'timeout' });
+    await vi.advanceTimersByTimeAsync(100);
+    await rejection;
+  });
+
+  it('aborts response consumption when the translation is cancelled', async () => {
+    const controller = new AbortController();
+    const response = await fetchProviderResponse('https://example.com/v1', 'chat/completions', 'openai-compatible', { signal: controller.signal }, {
+      providerName: 'Test', timeoutMs: 1000,
+      fetcher: async () => new Response(new ReadableStream({ start() {} })),
+    });
+    const rejection = expect(response.text()).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort(); await rejection;
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();

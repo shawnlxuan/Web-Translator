@@ -76,7 +76,7 @@ export const BLOCK_TAGS = new Set([
 export const NAV_TAGS = new Set(['NAV', 'HEADER', 'FOOTER']);
 
 /** Minimum text length to consider for translation */
-export const MIN_TEXT_LENGTH = 2;
+export const MIN_TEXT_LENGTH = 1;
 
 /** CSS class prefix for all injected elements */
 export const CSS_PREFIX = 'tr-';

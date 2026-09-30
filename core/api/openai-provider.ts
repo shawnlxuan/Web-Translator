@@ -50,6 +50,7 @@ export class OpenAIProvider implements LLMProvider {
     const { systemPrompt, userMessage } = buildOpenAIBatchPrompt(request);
     const response = await fetchProviderResponse(this.baseUrl, 'chat/completions', 'openai-compatible', {
       method: 'POST',
+      signal: request.signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
@@ -84,6 +85,9 @@ export class OpenAIProvider implements LLMProvider {
       for await (const chunk of parseOpenAISSEStream(response.body)) {
         if (chunk.content) {
           fullContent += chunk.content;
+        }
+        if (chunk.finishReason && chunk.finishReason !== 'stop') {
+          throw new Error(`译文未完整生成（${chunk.finishReason}），请缩小每批句子数后重试。`);
         }
         if (chunk.finishReason === 'stop') break;
       }
@@ -160,12 +164,16 @@ function extractOpenAIContent(body: unknown): string {
   const record = body as {
     error?: unknown;
     choices?: Array<{
+      finish_reason?: string;
       message?: { content?: unknown };
       delta?: { content?: unknown };
     }>;
   };
   if (record.error) {
     throw new Error(`OpenAI-compatible 接口返回错误：${formatJsonError(record.error)}`);
+  }
+  if (record.choices?.[0]?.finish_reason && record.choices[0].finish_reason !== 'stop') {
+    throw new Error(`译文未完整生成（${record.choices[0].finish_reason}）。`);
   }
   const content = record.choices?.[0]?.message?.content
     ?? record.choices?.[0]?.delta?.content;

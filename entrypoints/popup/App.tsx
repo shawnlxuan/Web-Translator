@@ -30,12 +30,15 @@ const App: React.FC = () => {
   const [pageProgress, setPageProgress] = useState({ total: 0, translated: 0 });
   const [pageError, setPageError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const activePageTabId = useRef<number | null>(null);
 
   const [manualText, setManualText] = useState('');
   const [manualResult, setManualResult] = useState('');
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualLoading, setManualLoading] = useState(false);
   const [copyLabel, setCopyLabel] = useState('复制');
+  const manualRequestId = useRef(0);
+  const manualInFlight = useRef(false);
 
   const activeProvider = useMemo(() => resolveActiveProvider(settings), [settings]);
   const providerReady = isProviderReady(activeProvider);
@@ -60,6 +63,8 @@ const App: React.FC = () => {
 
   const queryPageState = useCallback(async () => {
     try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      activePageTabId.current = tabs[0]?.id ?? null;
       const response = await chrome.runtime.sendMessage({ type: 'GET_TRANSLATION_STATE' });
       if (!response) return;
       const nextState = response.state || TranslationState.IDLE;
@@ -75,6 +80,18 @@ const App: React.FC = () => {
       // Restricted browser pages may not have a content script.
     }
   }, []);
+
+  useEffect(() => {
+    const listener = (message: { type?: string }, sender: chrome.runtime.MessageSender) => {
+      if (message.type === 'TRANSLATION_STATE_UPDATE' && sender.tab?.id === activePageTabId.current) {
+        void queryPageState();
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [queryPageState]);
+
+  useEffect(() => () => { manualRequestId.current++; }, []);
 
   useEffect(() => {
     chrome.runtime.sendMessage({ type: 'GET_SETTINGS' })
@@ -104,6 +121,10 @@ const App: React.FC = () => {
   }, [pageBusy, queryPageState]);
 
   const selectProvider = async (id: ProviderId) => {
+    manualRequestId.current++;
+    manualInFlight.current = false;
+    setManualLoading(false);
+    setManualResult('');
     setPageError(null);
     setManualError(null);
     try {
@@ -119,11 +140,19 @@ const App: React.FC = () => {
   };
 
   const changeSourceLanguage = (value: string) => {
+    manualRequestId.current++;
+    manualInFlight.current = false;
+    setManualLoading(false);
+    setManualResult('');
     setSourceLang(value);
     void updateSettings({ sourceLang: value }).catch(() => {});
   };
 
   const changeTargetLanguage = (value: string) => {
+    manualRequestId.current++;
+    manualInFlight.current = false;
+    setManualLoading(false);
+    setManualResult('');
     setTargetLang(value);
     void updateSettings({ targetLang: value }).catch(() => {});
   };
@@ -184,12 +213,15 @@ const App: React.FC = () => {
   };
 
   const translateText = async () => {
+    if (manualInFlight.current || !providerReady) return;
     const text = manualText.trim();
     if (!text) {
       setManualError('请输入要翻译的文字');
       return;
     }
     setManualLoading(true);
+    manualInFlight.current = true;
+    const requestId = ++manualRequestId.current;
     setManualError(null);
     setManualResult('');
     setCopyLabel('复制');
@@ -200,14 +232,20 @@ const App: React.FC = () => {
         sourceLang,
         targetLang,
       });
+      if (requestId !== manualRequestId.current) return;
       if (!response?.success || !response.translation) {
         throw new Error(response?.error || '翻译失败');
       }
       setManualResult(response.translation);
     } catch (error) {
-      setManualError(error instanceof Error ? error.message : String(error));
+      if (requestId === manualRequestId.current) {
+        setManualError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setManualLoading(false);
+      if (requestId === manualRequestId.current) {
+        manualInFlight.current = false;
+        setManualLoading(false);
+      }
     }
   };
 
@@ -297,6 +335,10 @@ const App: React.FC = () => {
             <textarea
               value={manualText}
               onChange={(event) => {
+                manualRequestId.current++;
+                manualInFlight.current = false;
+                setManualLoading(false);
+                setManualResult('');
                 setManualText(truncateToCodePoints(event.target.value, MANUAL_LIMIT));
                 setManualError(null);
               }}

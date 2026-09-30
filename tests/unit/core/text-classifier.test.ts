@@ -76,6 +76,20 @@ describe('shouldSkipNode', () => {
     expect(shouldSkipNode(textNode)).toBe(false);
   });
 
+  it.each(['true', '', 'plaintext-only'])('protects direct and nested text in contenteditable=%s', (value) => {
+    const editor = new FakeElement('div');
+    editor.setAttribute('contenteditable', value);
+    const child = new FakeElement('span');
+    child.parentElement = editor;
+    expect(shouldSkipNode({ parentElement: editor } as unknown as Node)).toBe(true);
+    expect(shouldSkipNode({ parentElement: child } as unknown as Node)).toBe(true);
+  });
+
+  it.each([['role', 'textbox'], ['data-tr-ignore', 'true']])('protects the text owner with %s=%s', (name, value) => {
+    const owner = new FakeElement('div'); owner.setAttribute(name, value);
+    expect(shouldSkipNode({ parentElement: owner } as unknown as Node)).toBe(true);
+  });
+
   it('skips code text inside preformatted code blocks', () => {
     const pre = new FakeElement('pre');
     const code = new FakeElement('code');

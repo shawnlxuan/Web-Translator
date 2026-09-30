@@ -94,6 +94,7 @@ async function handleMessage(message: BackgroundToContentMessage) {
       return startTranslation(message);
     }
     case 'TOGGLE_DISPLAY_MODE': {
+      currentDisplayMode = message.displayMode;
       toggleDisplayMode(message.displayMode);
       console.log('[AI Translator] Display mode toggled to:', message.displayMode);
       break;
@@ -211,6 +212,11 @@ function handleTranslationResponse(msg: InjectTranslationsMessage) {
 
     const segment = segments.find((s) => s.id === t.segmentId);
     if (!segment) continue;
+    if (segment.textNodes.some((node) => node.textNode.textContent?.trim() !== node.text)) {
+      markSegmentTranslationInjected(completed);
+      segment.isTranslated = true;
+      continue;
+    }
 
     const translation = joinSegmentTranslation(completed, currentTargetLang);
     dm.injectSegment(
@@ -319,6 +325,8 @@ function stopTranslation(pageId: string): boolean {
   extractedNodes = [];
   segments = [];
   segmentBuffers = new Map();
+  totalSegments = 0;
+  translatedSegments = 0;
   notifyStateChange();
   return true;
 }
@@ -335,6 +343,12 @@ function failTranslation(error: string) {
   mutationWatcher = null;
   dynamicContentQueue.clear(failedRunId);
   clearLoadingIndicators();
+  clearAllTranslations();
+  segments = [];
+  extractedNodes = [];
+  segmentBuffers = new Map();
+  totalSegments = 0;
+  translatedSegments = 0;
   notifyStateChange();
 }
 

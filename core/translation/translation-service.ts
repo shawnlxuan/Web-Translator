@@ -8,6 +8,7 @@ import type { CacheManager } from '../cache/cache-manager';
 import { createProviderCacheIdentity } from '../cache/cache-key';
 import type { SegmentContext, TranslationResult } from '../../shared/types';
 import type { TranslationRunSnapshot } from './translation-run';
+import { decodeInlineText, getInlineTextCount } from './inline-markup';
 
 export interface SerializedTranslationSentence {
   segmentId: string;
@@ -30,6 +31,7 @@ export interface CachedTranslationDependencies {
   provider: TranslationProvider;
   cache: TranslationCache;
   limiter: TranslationLimiter;
+  signal?: AbortSignal;
 }
 
 export class CachedTranslationService {
@@ -49,6 +51,8 @@ export class CachedTranslationService {
   async translate(
     request: CachedTranslationRequest,
   ): Promise<TranslationResult[]> {
+    const signal = this.dependencies.signal;
+    signal?.throwIfAborted();
     const results = new Map<number, TranslationResult>();
 
     await Promise.all(request.sentences.map(async (sentence, inputIndex) => {
@@ -61,10 +65,12 @@ export class CachedTranslationService {
         this.customPromptTemplate,
       );
 
-      if (cached !== null && cached.trim()) {
+      const count = getInlineTextCount(sentence.sentence);
+      if (cached !== null && cached.trim() && (!count || decodeInlineText(cached, count))) {
         results.set(inputIndex, toResult(sentence, cached, true));
       }
     }));
+    signal?.throwIfAborted();
 
     const misses = request.sentences
       .map((sentence, inputIndex) => ({ sentence, inputIndex }))
@@ -75,7 +81,8 @@ export class CachedTranslationService {
         this.dependencies.provider.translateBatch(
           this.createProviderRequest(request, misses),
         )
-      ));
+      ), signal);
+      signal?.throwIfAborted();
       const apiResults = this.resolveApiResults(response, misses);
 
       for (const { source, translation } of apiResults) {
@@ -126,6 +133,7 @@ export class CachedTranslationService {
       targetLang: request.targetLang,
       model: this.model,
       customPromptTemplate: this.customPromptTemplate,
+      ...(this.dependencies.signal ? { signal: this.dependencies.signal } : {}),
     };
   }
 
@@ -152,6 +160,10 @@ export class CachedTranslationService {
         || !translation.text.trim()
       ) {
         continue;
+      }
+      const count = getInlineTextCount(misses[translation.index].sentence.sentence);
+      if (count && !decodeInlineText(translation.text, count)) {
+        throw new Error('译文缺少内联文本标记，已保留网页原文。');
       }
 
       if (!resolved.has(translation.index)) {

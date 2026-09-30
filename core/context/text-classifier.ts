@@ -144,17 +144,8 @@ export function shouldSkipNode(
   const parent = node.parentElement;
   if (!parent) return true;
 
-  // Check tag name
-  if (shouldSkipElement(parent)) return true;
-  if (isVisuallyHiddenElement(parent)) return true;
-  if (isExtensionOwnedElement(parent)) return true;
-  if (
-    parent.hasAttribute(DATA_TRANSLATED_ATTR)
-    && !isAllowedDynamicSourceAncestor(parent, options.dynamicRoot)
-  ) return true;
-
-  // Check for any skipped ancestors
-  let ancestor = parent.parentElement;
+  // Apply the same protections to the text owner and every ancestor.
+  let ancestor: Element | null = parent;
   while (ancestor) {
     if (shouldSkipElement(ancestor)) return true;
     if (isVisuallyHiddenElement(ancestor)) return true;
@@ -163,7 +154,8 @@ export function shouldSkipNode(
       ancestor.hasAttribute(DATA_TRANSLATED_ATTR)
       && !isAllowedDynamicSourceAncestor(ancestor, options.dynamicRoot)
     ) return true;
-    if (ancestor.getAttribute('contenteditable') === 'true') return true;
+    const editable = ancestor.getAttribute('contenteditable');
+    if (editable !== null && editable.toLowerCase() !== 'false') return true;
     if (ancestor.getAttribute('role') === 'textbox') return true;
     if (ancestor.getAttribute('data-tr-ignore') === 'true') return true;
     ancestor = ancestor.parentElement;

@@ -13,7 +13,7 @@ import { hashStrings } from '../../shared/utils';
 import { DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
 import { normalizeEndpoint } from '../../shared/provider-presets';
 
-export const DEFAULT_PROMPT_CACHE_VERSION = 'default:v2';
+export const DEFAULT_PROMPT_CACHE_VERSION = 'default:v3';
 
 export interface ProviderCacheIdentity {
   profileId: ProviderId;
@@ -57,6 +57,7 @@ export async function computeCacheKey(
 ): Promise<string> {
   const promptVariant = getPromptCacheVariant(customPromptTemplate);
   const payload = JSON.stringify({
+    version: 3,
     text: sentence.trim(),
     sourceLang,
     targetLang,

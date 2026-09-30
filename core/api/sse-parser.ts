@@ -41,6 +41,7 @@ export async function* parseOpenAISSEStream(
     const event = parseOpenAILine(buffer);
     if (event !== 'done' && event) yield event;
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -59,7 +60,7 @@ export async function* parseOpenAISSEStream(
  */
 export async function* parseAnthropicSSEStream(
   body: ReadableStream<Uint8Array>,
-): AsyncIterable<{ content: string; finished: boolean }> {
+): AsyncIterable<{ content: string; finished: boolean; stopReason?: string }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -93,6 +94,7 @@ export async function* parseAnthropicSSEStream(
       yield event;
     }
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }
@@ -130,7 +132,7 @@ function parseOpenAILine(
 
 function parseAnthropicLine(
   line: string,
-): { content: string; finished: boolean } | 'done' | null {
+): { content: string; finished: boolean; stopReason?: string } | 'done' | null {
   const data = getSseData(line);
   if (data === null) return null;
 
@@ -144,6 +146,9 @@ function parseAnthropicLine(
         content: parsed.delta.text || '',
         finished: false,
       };
+    }
+    if (parsed?.type === 'message_delta' && parsed.delta?.stop_reason) {
+      return { content: '', finished: false, stopReason: parsed.delta.stop_reason };
     }
     return parsed?.type === 'message_stop' ? 'done' : null;
   } catch (error) {

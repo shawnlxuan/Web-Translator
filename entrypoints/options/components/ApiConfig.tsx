@@ -41,11 +41,22 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
   const [testing, setTesting] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const requestGeneration = useRef(0);
+
+  const invalidateRequests = () => {
+    requestGeneration.current++;
+    setTesting(false);
+    setFetchingModels(false);
+    setModels([]);
+  };
 
   const incomingSignature = providerSignature(settings);
   useEffect(() => {
     if (incomingSignature === persistedSignature.current) return;
     persistedSignature.current = incomingSignature;
+    requestGeneration.current++;
+    setTesting(false);
+    setFetchingModels(false);
     setProfiles(cloneProfiles(settings.providerProfiles));
     setSelectedId(settings.activeProviderId);
     setModels([]);
@@ -60,6 +71,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
 
   const updateSelected = (updates: Partial<Pick<ProviderProfile, 'apiKey' | 'endpoint' | 'model'>>) => {
     if (!selected) return;
+    invalidateRequests();
     setProfiles((current) => current.map((profile) => (
       profile.id === selected.id ? { ...profile, ...updates } : profile
     )));
@@ -82,6 +94,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
   const addCustom = () => {
     try {
       const profile = createCustomProviderProfile(newName, profiles);
+      invalidateRequests();
       setProfiles((current) => [...current, profile]);
       setSelectedId(profile.id);
       setNewName('');
@@ -98,6 +111,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
     if (!window.confirm(`删除“${selected.name}”？`)) return;
     try {
       const next = deleteCustomProfile(profiles, selected.id, selectedId);
+      invalidateRequests();
       setProfiles(next.profiles);
       setSelectedId(next.activeProviderId);
       setModels([]);
@@ -109,6 +123,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
 
   const resetSelected = () => {
     if (!selected || selected.kind !== 'builtin') return;
+    invalidateRequests();
     setProfiles((current) => current.map((profile) => (
       profile.id === selected.id ? resetBuiltinProfile(profile) : profile
     )));
@@ -156,16 +171,18 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
     if (!selected) return;
     setTesting(true);
     setMessage(null);
+    const generation = ++requestGeneration.current;
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'TEST_API_CONNECTION',
         profile: selected,
       });
+      if (generation !== requestGeneration.current) return;
       setMessage(response?.message || '连接测试无响应');
     } catch (error) {
-      setMessage(`连接失败：${error instanceof Error ? error.message : String(error)}`);
+      if (generation === requestGeneration.current) setMessage(`连接失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      setTesting(false);
+      if (generation === requestGeneration.current) setTesting(false);
     }
   };
 
@@ -173,19 +190,23 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
     if (!selected) return;
     setFetchingModels(true);
     setMessage(null);
+    const generation = ++requestGeneration.current;
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'FETCH_MODELS',
         profile: selected,
       });
+      if (generation !== requestGeneration.current) return;
       if (!response?.success) throw new Error(response?.error || '获取模型失败');
       setModels(response.models || []);
       setMessage(`已获取 ${response.models?.length || 0} 个模型`);
     } catch (error) {
-      setModels([]);
-      setMessage(error instanceof Error ? error.message : String(error));
+      if (generation === requestGeneration.current) {
+        setModels([]);
+        setMessage(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setFetchingModels(false);
+      if (generation === requestGeneration.current) setFetchingModels(false);
     }
   };
 
@@ -206,7 +227,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
           <div className="provider-list-label">固定</div>
           {builtins.map((profile) => (
             <button key={profile.id} className={profile.id === selected.id ? 'provider-item active' : 'provider-item'}
-              onClick={() => { setSelectedId(profile.id); setModels([]); setMessage(null); }}>
+              onClick={() => { invalidateRequests(); setSelectedId(profile.id); setMessage(null); }}>
               <span>{profile.preset ? BUILTIN_LABELS[profile.preset] : profile.name}</span>
               <span className={profile.apiKey.trim() ? 'status-dot ready' : 'status-dot'} aria-label={profile.apiKey.trim() ? '已配置' : '未配置'} />
             </button>
@@ -219,7 +240,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
           </div>
           {customProfiles.map((profile) => (
             <button key={profile.id} className={profile.id === selected.id ? 'provider-item active' : 'provider-item'}
-              onClick={() => { setSelectedId(profile.id); setModels([]); setMessage(null); }}>
+              onClick={() => { invalidateRequests(); setSelectedId(profile.id); setMessage(null); }}>
               <span>{profile.name || '未命名 API'}</span>
               <span className={profile.apiKey.trim() ? 'status-dot ready' : 'status-dot'} aria-label={profile.apiKey.trim() ? '已配置' : '未配置'} />
             </button>
@@ -285,10 +306,10 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
           </label>
 
           <div className="connection-actions">
-            <button className="test-btn" disabled={testing} onClick={() => void testConnection()}>
+            <button className="test-btn" disabled={testing || fetchingModels} onClick={() => void testConnection()}>
               {testing ? '测试中...' : '测试连接'}
             </button>
-            <button className="test-btn" disabled={fetchingModels || selected.protocol === 'anthropic'}
+            <button className="test-btn" disabled={testing || fetchingModels || selected.protocol === 'anthropic'}
               onClick={() => void fetchModels()}>
               {fetchingModels ? '获取中...' : '获取模型'}
             </button>

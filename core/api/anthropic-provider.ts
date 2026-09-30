@@ -67,6 +67,7 @@ export class AnthropicProvider implements LLMProvider {
 
     const response = await fetchProviderResponse(this.baseUrl, 'v1/messages', 'anthropic', {
       method: 'POST',
+      signal: request.signal,
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': this.apiKey,
@@ -97,6 +98,9 @@ export class AnthropicProvider implements LLMProvider {
     let fullContent = '';
 
     for await (const chunk of parseAnthropicSSEStream(response.body)) {
+      if (chunk.stopReason && !['end_turn', 'stop_sequence'].includes(chunk.stopReason)) {
+        throw new Error(`译文未完整生成（${chunk.stopReason}），请缩小每批句子数后重试。`);
+      }
       if (chunk.content) {
         fullContent += chunk.content;
       }

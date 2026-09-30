@@ -3,12 +3,15 @@ import { generateId } from '../../shared/utils';
 export interface ActiveRun {
   pageId: string;
   isActive: boolean;
+  cancel?: () => void;
 }
 
 export class ActiveRunRegistry<TRun extends ActiveRun> {
   private readonly runs = new Map<number, TRun>();
 
   activate(tabId: number, run: TRun): void {
+    const previous = this.runs.get(tabId);
+    if (previous && previous !== run) this.clear(tabId);
     this.runs.set(tabId, run);
   }
 
@@ -28,12 +31,13 @@ export class ActiveRunRegistry<TRun extends ActiveRun> {
   clear(tabId: number): TRun | undefined {
     const run = this.runs.get(tabId);
     this.runs.delete(tabId);
+    if (run) { run.isActive = false; run.cancel?.(); }
     return run;
   }
 
   clearIfCurrent(tabId: number, run: TRun): boolean {
     if (!this.isCurrent(tabId, run)) return false;
-    this.runs.delete(tabId);
+    this.clear(tabId);
     return true;
   }
 }

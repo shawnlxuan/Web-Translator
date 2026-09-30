@@ -15,6 +15,7 @@ export interface TranslationRunRecord {
   pageId: string;
   isActive: boolean;
   service: TranslationServiceLike | null;
+  cancel?: () => void;
 }
 
 export type SendToContent = (

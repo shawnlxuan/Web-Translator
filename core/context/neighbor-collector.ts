@@ -46,7 +46,7 @@ export function collectCrossBlockNeighbors(
   windowSize: number = 3,
 ): { beforeTexts: string[]; afterTexts: string[] } {
   const nodeIndex = allNodes.findIndex(
-    (n) => n.segmentId === currentNode.segmentId,
+    (n) => n.textNode === currentNode.textNode,
   );
   if (nodeIndex === -1) return { beforeTexts: [], afterTexts: [] };
 
@@ -54,17 +54,17 @@ export function collectCrossBlockNeighbors(
   const afterTexts: string[] = [];
 
   // Collect before
-  for (let i = nodeIndex - 1; i >= Math.max(0, nodeIndex - windowSize); i--) {
-    beforeTexts.unshift(allNodes[i].text);
+  for (let i = nodeIndex - 1; i >= 0 && beforeTexts.length < windowSize; i--) {
+    if (allNodes[i].text && allNodes[i].segmentId !== currentNode.segmentId) beforeTexts.unshift(allNodes[i].text);
   }
 
   // Collect after
   for (
     let i = nodeIndex + 1;
-    i < Math.min(allNodes.length, nodeIndex + 1 + windowSize);
+    i < allNodes.length && afterTexts.length < windowSize;
     i++
   ) {
-    afterTexts.push(allNodes[i].text);
+    if (allNodes[i].text && allNodes[i].segmentId !== currentNode.segmentId) afterTexts.push(allNodes[i].text);
   }
 
   return { beforeTexts, afterTexts };

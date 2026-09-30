@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  detectLanguage,
   normalizeLanguageFamily,
   shouldSkipTranslationForTarget,
 } from '../../../core/segmentation/language-detector';
 
 describe('language target filtering', () => {
+  it('translates mixed paragraphs even when a few target-script characters are present', () => {
+    expect(shouldSkipTranslationForTarget('请看 This entire English paragraph still needs translation.', 'zh-CN')).toBe(false);
+    expect(shouldSkipTranslationForTarget('这是一段包含 English text that must also be translated 的内容。', 'zh-CN')).toBe(false);
+    expect(shouldSkipTranslationForTarget('This sentence contains 中文内容 to translate.', 'en')).toBe(false);
+  });
+
+  it('distinguishes French accents from Vietnamese text', () => {
+    expect(shouldSkipTranslationForTarget('Le café est déjà fermé.', 'vi')).toBe(false);
+    expect(detectLanguage('Le café est déjà fermé.')).toBe('fr');
+    expect(detectLanguage('Bonjour le monde')).toBe('fr');
+  });
   it('treats Chinese variants as the same target language family', () => {
     expect(normalizeLanguageFamily('zh-CN')).toBe('zh');
     expect(normalizeLanguageFamily('zh-TW')).toBe('zh');

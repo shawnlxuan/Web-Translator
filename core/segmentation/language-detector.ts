@@ -92,6 +92,7 @@ const LATIN_LANGUAGE_MARKERS: Record<string, Set<string>> = {
     'ciao', 'mondo', 'il', 'lo', 'la', 'gli', 'le', 'un', 'una',
     'di', 'e', 'questo', 'questa', 'per', 'con', 'non',
   ]),
+  vi: new Set(['xin', 'chao', 'toi', 'ban', 'cua', 'va', 'khong', 'mot', 'nhung', 'nay']),
 };
 
 /**
@@ -123,9 +124,18 @@ export function detectLanguage(text: string): string {
   }
 
   // If CJK characters found, return that language
-  if (bestCode && bestScore > 2) {
+  const letterCount = text.match(/\p{L}/gu)?.length ?? 0;
+  if (hasJapaneseKana(text) && (scores.ja || 0) >= 2) return 'ja';
+  if (bestCode && bestCode !== 'vi' && bestScore > 2 && bestScore / Math.max(1, letterCount) > 0.5) {
     return bestCode;
   }
+
+  const latinScores = scoreLatinLanguageMarkers(text);
+  const bestLatin = Object.entries(latinScores).sort((a, b) => b[1] - a[1]);
+  if (bestLatin[0]?.[1] >= 2 && bestLatin[0][1] > (bestLatin[1]?.[1] ?? 0)) {
+    return bestLatin[0][0];
+  }
+  if (/[ăơưđ]/i.test(text) && (scores.vi || 0) >= 2) return 'vi';
 
   // English word check
   const words = text.toLowerCase().split(/\s+/);
@@ -137,7 +147,8 @@ export function detectLanguage(text: string): string {
     return 'en';
   }
 
-  return bestCode || 'en';
+  return bestCode && bestCode !== 'vi' && bestScore / Math.max(1, letterCount) > 0.5
+    ? bestCode : 'en';
 }
 
 /**
@@ -178,8 +189,10 @@ export function shouldSkipTranslationForTarget(
   }
 
   if (isLatinMarkerLanguage(targetFamily)) {
-    return hasLatinLanguageMarker(normalizedText, targetFamily);
+    return !/[一-鿿぀-ヿ가-힯฀-๿؀-ۿЀ-ӿ]/.test(normalizedText)
+      && hasLatinLanguageMarker(normalizedText, targetFamily);
   }
+  if (['zh', 'ja', 'ko', 'th', 'ru', 'ar'].includes(targetFamily)) return false;
 
   const detectedFamily = normalizeLanguageFamily(detectLanguage(normalizedText));
   if (detectedFamily === 'en' && targetFamily === 'en') {
@@ -259,28 +272,36 @@ function hasLanguageSignal(text: string): boolean {
 }
 
 function hasDirectFamilySignal(text: string, family: string): boolean {
+  const letters = text.match(/\p{L}/gu)?.length ?? 0;
+  const dominates = (regex: RegExp) => {
+    const count = countMatches(text, regex);
+    return count >= 2 && count / Math.max(1, letters) >= 0.9;
+  };
   if (family === 'zh') {
-    return countMatches(text, /[一-鿿㐀-䶿]/g) >= 2 && !hasJapaneseKana(text);
+    return dominates(/[一-鿿㐀-䶿]/g) && !hasJapaneseKana(text);
   }
 
   if (family === 'ja') {
-    return countMatches(text, /[぀-ゟ゠-ヿ]/g) >= 2;
+    return dominates(/[一-鿿぀-ゟ゠-ヿ]/g) && hasJapaneseKana(text);
   }
 
   if (family === 'ko') {
-    return countMatches(text, /[가-힯ᄀ-ᇿ]/g) >= 2;
+    return dominates(/[가-힯ᄀ-ᇿ]/g);
   }
 
   if (family === 'th') {
-    return countMatches(text, /[฀-๿]/g) >= 2;
+    return dominates(/[฀-๿]/g);
   }
+  if (family === 'ru') return dominates(/[Ѐ-ӿ]/g);
+  if (family === 'ar') return dominates(/[؀-ۿݐ-ݿ]/g);
 
   if (family === 'vi') {
-    return countMatches(text, /[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/gi) >= 2;
+    return hasLatinLanguageMarker(text, 'vi');
   }
 
   if (family === 'en') {
-    return hasLatinLanguageMarker(text, 'en');
+    return !/[一-鿿぀-ヿ가-힯฀-๿؀-ۿЀ-ӿ]/.test(text)
+      && hasLatinLanguageMarker(text, 'en');
   }
 
   return false;

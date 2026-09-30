@@ -130,6 +130,46 @@ const originalWindow = globalRef.window;
 const originalGetComputedStyle = globalRef.getComputedStyle;
 
 describe('DisplayManager', () => {
+  it('preserves host text changed while bilingual translation was displayed', () => {
+    const paragraph = new FakeElement('p');
+    const node = { textContent: 'Original', parentElement: paragraph } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+    manager.injectSegment(paragraph as unknown as Element, [node], '原文', 'host-text');
+    node.textContent = 'Updated by host';
+    manager.clearAll();
+    expect(node.textContent).toBe('Updated by host');
+  });
+
+  it('restores only text still owned by the extension in replace mode', () => {
+    const paragraph = new FakeElement('p');
+    const node = { textContent: 'Original', parentElement: paragraph } as unknown as Text;
+    const manager = new DisplayManager('replace');
+    manager.injectSegment(paragraph as unknown as Element, [node], '原文', 'host-replace');
+    node.textContent = 'Updated by host';
+    manager.toggleMode('bilingual');
+    manager.clearAll();
+    expect(node.textContent).toBe('Updated by host');
+  });
+
+  it('keeps translated text in its original link and emphasis nodes', () => {
+    const paragraph = new FakeElement('p'); const link = new FakeElement('a'); const emphasis = new FakeElement('strong');
+    paragraph.appendChild(link); paragraph.appendChild(emphasis);
+    link.setAttribute('href', '/docs');
+    const nodes = [
+      { textContent: 'Read the ', parentElement: paragraph },
+      { textContent: 'documentation', parentElement: link },
+      { textContent: ' carefully.', parentElement: emphasis },
+    ] as unknown as Text[];
+    const manager = new DisplayManager('replace');
+    manager.injectSegment(paragraph as unknown as Element, nodes, '[[TR:0]]阅读[[/TR:0]][[TR:1]]文档[[/TR:1]][[TR:2]]并仔细查看。[[/TR:2]]', 'inline');
+    expect(nodes[1].textContent).toBe('文档');
+    expect(nodes[2].textContent).toContain('仔细');
+    expect(link.getAttribute('href')).toBe('/docs');
+    manager.toggleMode('bilingual');
+    expect(nodes.map((node) => node.textContent)).toEqual(['Read the ', 'documentation', ' carefully.']);
+    manager.toggleMode('replace'); manager.clearAll();
+    expect(nodes[1].textContent).toBe('documentation');
+  });
   beforeEach(() => {
     Object.defineProperty(globalRef, 'document', {
       configurable: true,

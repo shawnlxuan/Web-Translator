@@ -7,6 +7,8 @@ import {
   type SerializedTranslationSentence,
 } from '../../../core/translation/translation-service';
 import { TextType, type SegmentContext } from '../../../shared/types';
+import { RateLimiter } from '../../../core/api/rate-limiter';
+import { encodeInlineText } from '../../../core/translation/inline-markup';
 
 function createSnapshot() {
   return createTranslationRunSnapshot({
@@ -54,6 +56,27 @@ function createSentence(
 }
 
 describe('CachedTranslationService', () => {
+  it('does not cache a response that lost its inline text-node boundaries', async () => {
+    const set = vi.fn(async () => {});
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch: async () => ({ translations: [{ index: 0, text: '阅读文档' }] }) },
+      cache: { get: async () => null, set }, limiter: new RateLimiter(),
+    });
+    await expect(service.translate({ sentences: [createSentence(encodeInlineText(['Read ', 'documentation']), 0)], sourceLang: 'en', targetLang: 'zh-CN' })).rejects.toThrow('内联文本标记');
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('shares concurrency permits across different translation services', async () => {
+    const limiter = new RateLimiter({ maxConcurrent: 1 }); let active = 0; let peak = 0;
+    const provider = { translateBatch: async () => {
+      active++; peak = Math.max(peak, active); await new Promise((resolve) => setTimeout(resolve, 1)); active--;
+      return { translations: [{ index: 0, text: '译文' }] };
+    } };
+    const deps = { provider, limiter, cache: { get: async () => null, set: async () => {} } };
+    const services = [new CachedTranslationService(createSnapshot(), deps), new CachedTranslationService(createSnapshot(), deps)];
+    await Promise.all(services.map((service) => service.translate({ sentences: [createSentence('Source', 0)], sourceLang: 'en', targetLang: 'zh-CN' })));
+    expect(peak).toBe(1);
+  });
   it('translates only cache misses and returns the complete input order', async () => {
     const cacheGet = vi.fn(async (...args: Parameters<CacheManager['get']>) => (
       args[0] === 'Cached sentence.' ? '缓存结果' : null

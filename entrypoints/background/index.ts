@@ -4,7 +4,9 @@
 // ============================================================
 
 import { onPopupMessage } from '../../core/messaging/message-utils';
-import { loadSettings, updateSettings } from '../../core/storage/settings-store';
+import { loadSettings as readSettings, updateSettings } from '../../core/storage/settings-store';
+import { PageRunStore } from '../../core/storage/page-run-store';
+import { getProviderProfile } from '../../shared/provider-presets';
 import { createProvider } from '../../core/api/provider-factory';
 import {
   fetchProviderModels,
@@ -48,6 +50,32 @@ let cacheManagerTTLDays = 30;
 
 // Track active translations per tab
 const activeTranslations = new ActiveRunRegistry<TranslationRunRecord>();
+const pageRunStore = new PageRunStore(chrome.storage.session);
+const sharedLimiter = new RateLimiter({ maxConcurrent: 5 });
+const tabVersions = new Map<number, number>();
+const restoringRuns = new Map<number, Promise<void>>();
+
+async function loadSettings() {
+  const settings = await readSettings();
+  sharedLimiter.configure({ maxConcurrent: settings.maxConcurrentCalls });
+  return settings;
+}
+
+function invalidateTab(tabId: number): void {
+  tabVersions.set(tabId, (tabVersions.get(tabId) ?? 0) + 1);
+  activeTranslations.clear(tabId);
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  invalidateTab(tabId);
+  void pageRunStore.remove(tabId).catch(() => {});
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // History/hash changes keep the same content script and active page run.
+  if (changeInfo.status !== 'loading') return;
+  invalidateTab(tabId);
+  void pageRunStore.remove(tabId).catch(() => {});
+});
 
 // Background service worker entry point
 console.log('[AI Translator] Background service worker started');
@@ -85,6 +113,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       }
       case 'UPDATE_SETTINGS': {
         const updated = await updateSettings(msg.settings);
+        sharedLimiter.configure({ maxConcurrent: updated.maxConcurrentCalls });
         return { type: 'SETTINGS_RESPONSE', settings: updated };
       }
       case 'GET_TRANSLATION_STATE': {
@@ -169,12 +198,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
     switch (command) {
       case 'toggle-translation': {
+        const state = await sendToContent(tabs[0].id, { type: 'GET_TRANSLATION_STATE' })
+          .catch(() => null) as { state?: string } | null;
+        if (state && ['extracting', 'translating', 'complete'].includes(state.state || '')) {
+          await handleStopTranslation({ type: 'STOP_TRANSLATION' }, tabs[0].id);
+          break;
+        }
         const settings = await loadSettings();
         await handleStartTranslation({
           type: 'START_TRANSLATION',
           targetLang: settings.targetLang,
           sourceLang: settings.sourceLang,
-        });
+        }, tabs[0].id);
         break;
       }
       case 'toggle-mode': {
@@ -205,11 +240,14 @@ async function handleStartTranslation(
   if (tabId == null) {
     return { type: 'TRANSLATION_ERROR', error: 'No active tab found' };
   }
+  invalidateTab(tabId);
+  const controller = new AbortController();
 
   const run: TranslationRunRecord = {
     pageId: createPageId(tabId),
     isActive: true,
     service: null,
+    cancel: () => controller.abort(),
   };
   activeTranslations.activate(tabId, run);
 
@@ -217,7 +255,10 @@ async function handleStartTranslation(
     activeTranslations,
     tabId,
     run,
-    async () => createTranslationRunSnapshot(await loadSettings()),
+    async () => {
+      await pageRunStore.remove(tabId);
+      return createTranslationRunSnapshot(await loadSettings());
+    },
   );
   if (initialization.status === 'stale') {
     return { type: 'TRANSLATION_STOPPED' };
@@ -230,8 +271,10 @@ async function handleStartTranslation(
   const { settings } = snapshot;
 
   try {
-    run.service = createCachedTranslationService(snapshot);
+    run.service = createCachedTranslationService(snapshot, controller.signal);
+    await pageRunStore.save(tabId, { pageId: run.pageId, snapshot });
   } catch (error: any) {
+    await pageRunStore.remove(tabId, run.pageId).catch(() => {});
     if (!activeTranslations.clearIfCurrent(tabId, run)) {
       return { type: 'TRANSLATION_STOPPED' };
     }
@@ -252,6 +295,7 @@ async function handleStartTranslation(
   if (delivery.status === 'started') {
     return { type: 'TRANSLATION_STARTED', pageId: run.pageId };
   }
+  await pageRunStore.remove(tabId, run.pageId);
   if (delivery.status === 'failed') {
     return { type: 'TRANSLATION_ERROR', error: delivery.error };
   }
@@ -264,8 +308,12 @@ async function handleStopTranslation(
 ) {
   const tabId = requestedTabId ?? await getActiveTabId();
   if (tabId == null) return { type: 'TRANSLATION_STOPPED' };
-
-  await stopTranslationRun(activeTranslations, tabId, sendToContent).catch(() => false);
+  tabVersions.set(tabId, (tabVersions.get(tabId) ?? 0) + 1);
+  const storedRunPromise = pageRunStore.get(tabId);
+  const stopping = stopTranslationRun(activeTranslations, tabId, sendToContent).catch(() => false);
+  const storedRun = await storedRunPromise;
+  await stopping;
+  if (storedRun) await pageRunStore.remove(tabId, storedRun.pageId);
   return { type: 'TRANSLATION_STOPPED' };
 }
 
@@ -283,9 +331,41 @@ async function handleSegmentsReady(
   sender: chrome.runtime.MessageSender,
 ) {
   const tabId = sender.tab?.id;
-  if (!tabId) return;
+  if (tabId == null) return;
+  await restorePageRun(tabId, msg.pageId);
+  try {
+    await processTranslationBatch(activeTranslations, tabId, msg, sendToContent);
+  } finally {
+    if (!activeTranslations.getMatching(tabId, msg.pageId)) {
+      await pageRunStore.remove(tabId, msg.pageId);
+    }
+  }
+}
 
-  await processTranslationBatch(activeTranslations, tabId, msg, sendToContent);
+async function restorePageRun(tabId: number, pageId: string): Promise<void> {
+  if (activeTranslations.get(tabId)) return;
+  if (restoringRuns.has(tabId)) { await restoringRuns.get(tabId); return; }
+  const version = tabVersions.get(tabId) ?? 0;
+  const restoring = (async () => {
+    const stored = await pageRunStore.get(tabId);
+    if (!stored || stored.pageId !== pageId) return;
+    const state = await sendToContent(tabId, { type: 'GET_TRANSLATION_STATE' }) as { pageId?: string; state?: string };
+    if (state?.pageId !== pageId || state.state === 'idle' || state.state === 'error') return;
+    const settings = await loadSettings();
+    const currentProfile = getProviderProfile(settings, stored.snapshot.provider.id);
+    if (!currentProfile) throw new Error('此翻译任务的 API 配置已删除，请重新翻译。');
+    const snapshot = createTranslationRunSnapshot(stored.snapshot.settings);
+    snapshot.provider = { ...stored.snapshot.provider, apiKey: currentProfile.apiKey };
+    if ((tabVersions.get(tabId) ?? 0) !== version || activeTranslations.get(tabId)) return;
+    const controller = new AbortController();
+    activeTranslations.activate(tabId, {
+      pageId, isActive: true,
+      cancel: () => controller.abort(),
+      service: createCachedTranslationService(snapshot, controller.signal),
+    });
+  })();
+  restoringRuns.set(tabId, restoring);
+  try { await restoring; } finally { restoringRuns.delete(tabId); }
 }
 
 function sendToContent(
@@ -398,12 +478,12 @@ async function triggerSelectionTranslation(
 
 function createCachedTranslationService(
   snapshot: TranslationRunSnapshot,
+  signal?: AbortSignal,
 ): CachedTranslationService {
   return new CachedTranslationService(snapshot, {
     provider: createProvider(snapshot.provider),
     cache: getCacheManager(snapshot.settings.cacheTTLDays),
-    limiter: new RateLimiter({
-      maxConcurrent: snapshot.settings.maxConcurrentCalls,
-    }),
+    limiter: sharedLimiter,
+    signal,
   });
 }

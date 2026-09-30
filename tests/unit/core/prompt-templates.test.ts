@@ -4,6 +4,11 @@ import type { SegmentContext } from '../../../shared/types';
 import { TextType } from '../../../shared/types';
 
 describe('buildTranslationPrompt', () => {
+  it('keeps all configured neighboring sentences in batch prompts', () => {
+    const context = { ...baseContext, beforeSentences: ['before1', 'before2', 'before3', 'before4'], afterSentences: ['after1', 'after2', 'after3', 'after4'] };
+    const { userMessage } = buildBatchPrompt([{ index: 0, text: 'target', context }], 'en', 'zh-CN', context);
+    for (const neighbor of [...context.beforeSentences, ...context.afterSentences]) expect(userMessage).toContain(neighbor);
+  });
   const baseContext: SegmentContext = {
     sentence: 'The quick brown fox jumps over the lazy dog.',
     textType: TextType.PARAGRAPH,

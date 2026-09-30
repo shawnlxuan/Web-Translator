@@ -14,7 +14,7 @@ export function getHeadingPath(node: Node): string[] {
 
   for (const heading of allHeadings) {
     // Check if this heading precedes our node in document order
-    if (heading.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) {
+    if (heading.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING) {
       break;
     }
 
@@ -55,7 +55,7 @@ export function getHeadingPathFromHeadings(
   for (const h of headingElements) {
     if (
       h.element.compareDocumentPosition(targetElement) &
-      Node.DOCUMENT_POSITION_FOLLOWING
+      Node.DOCUMENT_POSITION_PRECEDING
     ) {
       break;
     }

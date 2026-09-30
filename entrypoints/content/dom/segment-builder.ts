@@ -5,6 +5,7 @@
 import type { ExtractedTextNode, Segment } from '../../../shared/types';
 import { generateId } from '../../../shared/utils';
 import { splitSentences } from '../../../core/segmentation/sentence-splitter';
+import { encodeInlineText } from '../../../core/translation/inline-markup';
 
 /**
  * Group extracted text nodes into segments.
@@ -30,11 +31,14 @@ export function buildSegments(
     if (nodes.length === 0) continue;
 
     // Combine text from all nodes in this group
-    const combinedText = nodes.map((n) => n.text).join(' ');
+    const sourceTexts = nodes.map((n) => n.textNode.textContent ?? n.text);
+    const combinedText = sourceTexts.join('').trim();
     if (combinedText.trim().length === 0) continue;
 
     // Split into sentences
-    const sentences = splitSentences(combinedText, sourceLang);
+    const sentences = nodes.length > 1
+      ? [encodeInlineText(sourceTexts)]
+      : splitSentences(combinedText, sourceLang);
     if (sentences.length === 0) continue;
 
     const segment: Segment = {
@@ -88,50 +92,8 @@ export function buildSegmentsWithProgress(
   sourceLang: string = 'en',
   onProgress?: (current: number, total: number) => void,
 ): Segment[] {
-  const groups = groupByBlockElement(textNodes);
-  const groupEntries = Array.from(groups.entries());
-  const total = groupEntries.length;
-  const segments: Segment[] = [];
-
-  for (let i = 0; i < total; i++) {
-    const [element, nodes] = groupEntries[i];
-
-    if (nodes.length === 0) {
-      onProgress?.(i + 1, total);
-      continue;
-    }
-
-    const combinedText = nodes.map((n) => n.text).join(' ');
-    if (combinedText.trim().length === 0) {
-      onProgress?.(i + 1, total);
-      continue;
-    }
-
-    const sentences = splitSentences(combinedText, sourceLang);
-    if (sentences.length === 0) {
-      onProgress?.(i + 1, total);
-      continue;
-    }
-
-    const segmentId = generateId();
-    for (const node of nodes) {
-      node.segmentId = segmentId;
-    }
-
-    segments.push({
-      id: segmentId,
-      type: nodes[0].type,
-      tagName: element.tagName.toLowerCase(),
-      textNodes: nodes,
-      sentences,
-      blockElement: element,
-      isTranslated: false,
-      originalText: combinedText,
-    });
-
-    onProgress?.(i + 1, total);
-  }
-
+  const segments = buildSegments(textNodes, sourceLang);
+  segments.forEach((_, index) => onProgress?.(index + 1, segments.length));
   return segments;
 }
 

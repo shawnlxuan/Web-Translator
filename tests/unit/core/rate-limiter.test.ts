@@ -16,6 +16,26 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('RateLimiter', () => {
+  it('removes cancelled queued requests without consuming a permit', async () => {
+    const limiter = new RateLimiter({ maxConcurrent: 1 }); const gate = deferred(); const controller = new AbortController();
+    const first = limiter.execute(() => gate.promise); const operation = vi.fn(async () => 'cancelled');
+    const queued = limiter.execute(operation, controller.signal);
+    const rejection = expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort(); await rejection; gate.resolve(); await first;
+    expect(operation).not.toHaveBeenCalled();
+    await expect(limiter.execute(async () => 'next')).resolves.toBe('next');
+  });
+
+  it('cancels retry backoff and frees the permit immediately', async () => {
+    vi.useFakeTimers(); vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const limiter = new RateLimiter({ maxConcurrent: 1 }); const controller = new AbortController();
+    const operation = vi.fn(async () => { throw { statusCode: 429 }; });
+    const running = limiter.execute(operation, controller.signal);
+    const rejection = expect(running).rejects.toMatchObject({ name: 'AbortError' });
+    await flushPromises(); controller.abort(); await rejection;
+    await expect(limiter.execute(async () => 'next')).resolves.toBe('next');
+    await vi.advanceTimersByTimeAsync(60_000); expect(operation).toHaveBeenCalledTimes(1);
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();

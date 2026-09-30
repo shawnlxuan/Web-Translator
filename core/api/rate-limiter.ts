@@ -36,6 +36,9 @@ export class RateLimiter {
   private running = 0;
   private queue: Array<{
     resolve: () => void;
+    reject: (error: unknown) => void;
+    signal?: AbortSignal;
+    onAbort: () => void;
   }> = [];
   private config: RateLimiterConfig;
 
@@ -52,15 +55,21 @@ export class RateLimiter {
    * Acquire a token before making an API call.
    * Returns when a token is available.
    */
-  async acquire(): Promise<void> {
+  async acquire(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (this.running < this.config.maxConcurrent) {
       this.running++;
       return;
     }
 
     // Queue and wait
-    return new Promise((resolve) => {
-      this.queue.push({ resolve });
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, signal, onAbort: () => {
+        this.queue = this.queue.filter((candidate) => candidate !== entry);
+        reject(signal?.reason);
+      } };
+      this.queue.push(entry);
+      signal?.addEventListener('abort', entry.onAbort, { once: true });
     });
   }
 
@@ -77,8 +86,8 @@ export class RateLimiter {
   /**
    * Execute an async operation with rate limiting and retries.
    */
-  async execute<T>(fn: () => Promise<T>): Promise<T> {
-    await this.acquire();
+  async execute<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    await this.acquire(signal);
 
     const retries = {
       rateLimit: 0,
@@ -88,9 +97,11 @@ export class RateLimiter {
 
     try {
       while (true) {
+        signal?.throwIfAborted();
         try {
           return await fn();
         } catch (error: unknown) {
+          signal?.throwIfAborted();
           const category = this.getRetryCategory(error);
           if (!category || !this.shouldRetry(category, retries)) throw error;
 
@@ -99,7 +110,7 @@ export class RateLimiter {
           console.warn(
             `[RateLimiter] Retry ${attempt + 1} after ${delay}ms (${category})`,
           );
-          await sleep(delay);
+          await sleep(delay, signal);
           retries[category]++;
         }
       }
@@ -114,6 +125,8 @@ export class RateLimiter {
       && this.running < this.config.maxConcurrent
     ) {
       const entry = this.queue.shift()!;
+      entry.signal?.removeEventListener('abort', entry.onAbort);
+      if (entry.signal?.aborted) { entry.reject(entry.signal.reason); continue; }
       this.running++;
       entry.resolve();
     }
@@ -163,6 +176,14 @@ export class RateLimiter {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(timer); reject(signal?.reason); };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }

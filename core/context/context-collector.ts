@@ -87,7 +87,9 @@ export function collectContext(
     pageLanguage: cachedMetadata.pageLanguage,
     headingPath,
     sectionTitle: headingPath.length > 0 ? headingPath[headingPath.length - 1] : undefined,
-    beforeSentences: mergeUnique(beforeSentences, beforeTexts).slice(0, windowSize),
+    beforeSentences: windowSize > 0
+      ? mergeUnique(beforeTexts, beforeSentences).slice(-windowSize)
+      : [],
     afterSentences: mergeUnique(afterSentences, afterTexts).slice(0, windowSize),
     siblingContext: siblingContext || undefined,
   };

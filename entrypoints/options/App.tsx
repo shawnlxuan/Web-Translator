@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { DisplayMode, Settings } from '../../shared/types';
-import { DEFAULT_SETTINGS, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
+import { DEFAULT_SETTINGS, DEFAULT_SYSTEM_PROMPT_TEMPLATE, SUPPORTED_LANGUAGES } from '../../shared/constants';
 import ApiConfig from './components/ApiConfig';
 
 const APP_ICON_URL = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
@@ -132,14 +132,9 @@ const TranslationSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
         <label className="form-group">
           <span className="form-label">默认目标语言</span>
           <select value={targetLang} onChange={(event) => setTargetLang(event.target.value)} className="form-select">
-            <option value="zh-CN">中文（简体）</option>
-            <option value="zh-TW">中文（繁體）</option>
-            <option value="en">English</option>
-            <option value="ja">日本語</option>
-            <option value="ko">한국어</option>
-            <option value="fr">Français</option>
-            <option value="de">Deutsch</option>
-            <option value="es">Español</option>
+            {SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto').map((language) => (
+              <option key={language.code} value={language.code}>{language.name}</option>
+            ))}
           </select>
         </label>
         <label className="form-group">

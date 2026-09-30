@@ -58,8 +58,10 @@ export function extractTextNodes(
     if (!opts.includeNav && isNavContent(node)) continue;
 
     // Check text content
-    const text = node.textContent?.trim() || '';
-    if (text.length < opts.minTextLength) continue;
+    const rawText = node.textContent || '';
+    const text = rawText.trim();
+    // Keep separator nodes provisionally so inline words do not become joined.
+    if (!rawText || (text && text.length < opts.minTextLength)) continue;
 
     // Check visibility
     if (!opts.includeOffscreen) {
@@ -93,7 +95,17 @@ export function extractTextNodes(
     });
   }
 
-  return results;
+  const bounds = new Map<Element, { first: number; last: number }>();
+  results.forEach((item, index) => {
+    if (!item.text) return;
+    const range = bounds.get(item.blockElement);
+    bounds.set(item.blockElement, { first: range?.first ?? index, last: index });
+  });
+  return results.filter((item, index) => {
+    if (item.text) return true;
+    const range = bounds.get(item.blockElement);
+    return range !== undefined && index > range.first && index < range.last;
+  });
 }
 
 /**

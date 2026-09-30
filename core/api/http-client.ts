@@ -41,24 +41,64 @@ export async function fetchProviderResponse(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
   let timedOut = false;
-  controller.signal.addEventListener('abort', () => {
-    timedOut = true;
-  }, { once: true });
+  const externalSignal = init.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromCaller();
+  else externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const cleanup = () => {
+    clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abortFromCaller);
+  };
+  const normalizeError = (error: unknown): Error => {
+    if (externalSignal?.aborted) return new DOMException('Translation cancelled', 'AbortError');
+    timedOut = controller.signal.aborted;
+    return new ProviderNetworkError(options.providerName, endpoint, timedOut ? 'timeout' : 'network', error);
+  };
 
   try {
-    return await (options.fetcher ?? fetch)(url, {
+    if (externalSignal?.aborted) throw externalSignal.reason;
+    const response = await (options.fetcher ?? fetch)(url, {
       ...init,
       signal: controller.signal,
     });
+    if (!response.body) { cleanup(); return response; }
+    const reader = response.body.getReader();
+    let finished = false;
+    let wrappedController: ReadableStreamDefaultController<Uint8Array>;
+    const stop = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      controller.signal.removeEventListener('abort', abortBody);
+    };
+    const abortBody = () => {
+      if (finished) return;
+      wrappedController.error(normalizeError(controller.signal.reason));
+      stop();
+      void reader.cancel().catch(() => {});
+    };
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        wrappedController = streamController;
+        controller.signal.addEventListener('abort', abortBody, { once: true });
+        if (controller.signal.aborted) abortBody();
+      },
+      async pull(streamController) {
+        try {
+          const result = await reader.read();
+          if (finished) return;
+          if (result.done) { stop(); streamController.close(); }
+          else streamController.enqueue(result.value);
+        } catch (error) {
+          if (!finished) { streamController.error(normalizeError(error)); stop(); }
+        }
+      },
+      async cancel() { stop(); await reader.cancel().catch(() => {}); },
+    });
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } catch (error) {
-    throw new ProviderNetworkError(
-      options.providerName,
-      endpoint,
-      timedOut ? 'timeout' : 'network',
-      error,
-    );
-  } finally {
-    clearTimeout(timeout);
+    cleanup();
+    throw normalizeError(error);
   }
 }
 

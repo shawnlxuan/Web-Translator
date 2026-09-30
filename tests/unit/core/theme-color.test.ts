@@ -31,7 +31,7 @@ describe('extension theme colors', () => {
     expect(contentStyles).toContain("content: '·'");
     expect(contentStyles).toContain("content: '↳'");
     expect(contentStyles).toMatch(
-      /\.tr-compact-translation\s*\{[^}]*background: transparent;[^}]*white-space: nowrap;/s,
+      /\.tr-compact-translation\s*\{[^}]*background: transparent;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/s,
     );
     expect(contentStyles).toMatch(
       /\.tr-table-translation\s*\{[^}]*background: transparent;[^}]*white-space: normal;/s,
