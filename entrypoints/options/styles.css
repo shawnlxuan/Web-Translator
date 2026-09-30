@@ -310,44 +310,20 @@ svg {
   color: var(--tr-brand);
 }
 
-.provider-icon svg {
+.provider-icon svg,
+.provider-icon img {
+  display: block;
   width: 24px;
   height: 24px;
 }
 
-.provider-icon.openai,
-.provider-icon.anthropic,
-.provider-icon.kimi {
-  color: #14171c;
-}
-
-.provider-icon.deepseek,
-.provider-icon.glm {
-  color: #4366ff;
-}
-
-.provider-icon.minimax {
-  color: #f65064;
-}
-
-.provider-wordmark {
-  font-size: 23px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -2px;
-}
-
-.provider-mi {
-  display: grid;
-  place-items: center;
-  width: 23px;
-  height: 23px;
-  border-radius: 5px;
+.xiaomi-mark {
+  width: 24px;
+  height: 24px;
   background: #ff6900;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -1px;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
 }
 
 .provider-icon.custom {

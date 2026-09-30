@@ -2,12 +2,19 @@
   box-sizing: border-box;
 }
 
+html,
 body {
-  width: 400px;
+  width: 360px;
+  overflow-x: hidden;
+}
+
+body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  background: var(--tr-page);
+  background: linear-gradient(150deg, #fff 20%, #f5f7ff 100%);
   color: var(--tr-text);
+  font-size: 13px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -32,14 +39,11 @@ button:focus-visible {
 
 .app-container,
 .popup-loading {
-  width: 400px;
+  width: 360px;
 }
 
 .app-container {
-  padding: 18px 16px 16px;
-  border: 1px solid var(--tr-border);
-  border-radius: 14px;
-  background: linear-gradient(150deg, #fff 20%, #f5f7ff 100%);
+  padding: 14px;
 }
 
 .popup-loading {
@@ -65,21 +69,21 @@ button:focus-visible {
 .app-header {
   justify-content: space-between;
   gap: 12px;
-  margin: 0 2px 16px;
+  margin: 0 2px 12px;
 }
 
 .brand-row {
-  gap: 11px;
+  gap: 9px;
 }
 
 .app-logo {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
 }
 
 .app-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 750;
   line-height: 1.3;
 }
@@ -104,9 +108,9 @@ button:focus-visible {
 .main-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: 44px;
+  height: 40px;
   padding: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   border-radius: 11px;
   background: var(--tr-surface-hover);
 }
@@ -116,12 +120,12 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: var(--tr-text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -143,14 +147,14 @@ button:focus-visible {
 }
 
 .popup-card {
-  padding: 12px;
+  padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.9);
   border-radius: 12px;
   background: var(--tr-surface);
 }
 
 .shared-controls {
-  padding-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--tr-border-soft);
 }
 
@@ -158,7 +162,7 @@ button:focus-visible {
 .language-control,
 .display-control {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
@@ -166,7 +170,7 @@ button:focus-visible {
 .control-label {
   margin: 0;
   color: var(--tr-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -176,13 +180,13 @@ button:focus-visible {
   appearance: none;
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   padding: 0 32px 0 12px;
   border: 1px solid var(--tr-border);
   border-radius: 7px;
   background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23505b77' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center / 17px;
   color: var(--tr-text);
-  font-size: 14px;
+  font-size: 13px;
   box-shadow: 0 1px 2px rgba(28, 36, 67, 0.02);
 }
 
@@ -197,9 +201,9 @@ button:focus-visible {
 .provider-summary {
   justify-content: space-between;
   gap: 8px;
-  min-height: 32px;
-  margin: 8px 0 0 62px;
-  padding: 7px 11px;
+  min-height: 30px;
+  margin: 7px 0 0 58px;
+  padding: 6px 10px;
   border-radius: 8px;
   background: var(--tr-surface-muted);
   font-size: 12px;
@@ -247,11 +251,11 @@ button:focus-visible {
 .language-grid {
   display: grid;
   gap: 10px;
-  padding: 12px 0;
+  padding: 10px 0;
 }
 
 .display-control {
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--tr-border-soft);
 }
 
@@ -259,7 +263,7 @@ button:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3px;
-  min-height: 42px;
+  min-height: 38px;
   padding: 3px;
   border: 1px solid var(--tr-border-soft);
   border-radius: 9px;
@@ -270,7 +274,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 5px;
   padding: 0 4px;
   border: 0;
   border-radius: 7px;
@@ -331,11 +335,11 @@ button:focus-visible {
 .manual-translate-btn {
   position: relative;
   width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   border: 0;
   border-radius: 10px;
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 650;
   transition: box-shadow 150ms, filter 150ms;
 }
@@ -423,8 +427,8 @@ button:focus-visible {
 .manual-input-wrap textarea {
   display: block;
   width: 100%;
-  height: 112px;
-  min-height: 112px;
+  height: 104px;
+  min-height: 104px;
   resize: vertical;
   padding: 10px 11px 28px;
   border: 1px solid var(--tr-border);
@@ -432,7 +436,7 @@ button:focus-visible {
   background: #fff;
   color: var(--tr-text);
   line-height: 1.55;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .manual-input-wrap textarea::placeholder {

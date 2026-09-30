@@ -16,6 +16,8 @@ import {
   findBlockElement,
 } from '../../../core/context/text-classifier';
 import { splitSentences } from '../../../core/segmentation/sentence-splitter';
+import { getIconMarkup } from '../../../shared/icons/icon-markup';
+import { renderSelectionResult } from './selection-result';
 
 const ACTION_SIZE = 30;
 const OVERLAY_GAP = 8;
@@ -103,7 +105,9 @@ class SelectionTranslator {
   private readonly result: HTMLElement;
   private readonly error: HTMLElement;
   private readonly copyButton: HTMLButtonElement;
+  private readonly copyLabel: HTMLElement;
   private readonly retryButton: HTMLButtonElement;
+  private readonly footer: HTMLElement;
   private settingsLink: HTMLAnchorElement;
   private settings: Settings = DEFAULT_SETTINGS;
   private snapshot: SelectionSnapshot | null = null;
@@ -111,6 +115,7 @@ class SelectionTranslator {
   private selectionTimer: number | null = null;
   private requestId = 0;
   private panelOpen = false;
+  private translationText = '';
   private lastContextPoint: { x: number; y: number } | null = null;
 
   constructor() {
@@ -130,14 +135,17 @@ class SelectionTranslator {
     this.result = this.requiredElement<HTMLElement>('[data-result]');
     this.error = this.requiredElement<HTMLElement>('[data-error]');
     this.copyButton = this.requiredElement<HTMLButtonElement>('[data-copy]');
+    this.copyLabel = this.requiredElement<HTMLElement>('[data-copy-label]');
     this.retryButton = this.requiredElement<HTMLButtonElement>('[data-retry]');
+    this.footer = this.requiredElement<HTMLElement>('[data-footer]');
     this.settingsLink = this.requiredElement<HTMLAnchorElement>('[data-settings]');
   }
 
   mount(): void {
     document.body.appendChild(this.host);
-    const icon = this.requiredElement<HTMLImageElement>('[data-icon]');
-    icon.src = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
+    this.shadow.querySelectorAll<HTMLImageElement>('[data-icon]').forEach((icon) => {
+      icon.src = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
+    });
     this.settingsLink.href = chrome.runtime.getURL('entrypoints/options/index.html');
 
     this.action.addEventListener('pointerdown', (event) => event.preventDefault());
@@ -385,22 +393,26 @@ class SelectionTranslator {
     this.status.textContent = '正在翻译…';
     this.result.hidden = true;
     this.result.textContent = '';
+    this.translationText = '';
     this.error.hidden = true;
     this.error.textContent = '';
     this.copyButton.hidden = true;
     this.retryButton.hidden = true;
     this.settingsLink.hidden = true;
+    this.footer.hidden = true;
   }
 
   private renderResult(translation: string): void {
     this.status.hidden = true;
-    this.result.textContent = translation;
+    this.translationText = translation;
+    renderSelectionResult(this.result, translation);
     this.result.hidden = false;
     this.error.hidden = true;
     this.copyButton.hidden = false;
-    this.copyButton.textContent = '复制';
+    this.copyLabel.textContent = '复制';
     this.retryButton.hidden = false;
     this.settingsLink.hidden = true;
+    this.footer.hidden = false;
   }
 
   private renderError(message: string, canRetry = true): void {
@@ -411,23 +423,24 @@ class SelectionTranslator {
     this.copyButton.hidden = true;
     this.retryButton.hidden = !canRetry;
     this.settingsLink.hidden = !canRetry;
+    this.footer.hidden = !canRetry;
   }
 
   private async copyResult(): Promise<void> {
-    const translation = this.result.textContent?.trim();
+    const translation = this.translationText;
     if (!translation) return;
     try {
       await navigator.clipboard.writeText(translation);
-      this.copyButton.textContent = '已复制';
+      this.copyLabel.textContent = '已复制';
       window.setTimeout(() => {
-        if (this.copyButton.textContent === '已复制') {
-          this.copyButton.textContent = '复制';
+        if (this.copyLabel.textContent === '已复制') {
+          this.copyLabel.textContent = '复制';
         }
       }, 1400);
     } catch {
       this.error.textContent = '复制失败，请手动选择译文复制。';
       this.error.hidden = false;
-      this.copyButton.textContent = '复制失败';
+      this.copyLabel.textContent = '复制失败';
     }
   }
 
@@ -449,7 +462,7 @@ class SelectionTranslator {
     const rect = element.getBoundingClientRect();
     const position = getAnchoredOverlayPosition(
       anchor,
-      rect.width || (element === this.action ? ACTION_SIZE : 360),
+      rect.width || (element === this.action ? ACTION_SIZE : 380),
       rect.height || (element === this.action ? ACTION_SIZE : 180),
       window.innerWidth,
       window.innerHeight,
@@ -560,10 +573,17 @@ function createShadowMarkup(): string {
   return `
     <style>
       :host { all: initial; }
+      *, *::before, *::after { box-sizing: border-box; }
       [hidden] { display: none !important; }
       button, a {
-        font: 500 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       }
+      button { user-select: none; }
+      button:focus-visible, a:focus-visible {
+        outline: 3px solid rgba(124, 58, 237, 0.2);
+        outline-offset: 2px;
+      }
+      svg { display: block; flex-shrink: 0; }
       [data-action] {
         position: fixed;
         width: ${ACTION_SIZE}px;
@@ -576,102 +596,161 @@ function createShadowMarkup(): string {
         cursor: pointer;
         pointer-events: auto;
       }
-      [data-action]:hover,
-      [data-action]:focus-visible {
+      [data-action]:hover {
         transform: translateY(-1px);
         border-color: rgba(124, 58, 237, 0.55);
         box-shadow: 0 7px 22px rgba(15, 23, 42, 0.25);
-        outline: none;
       }
-      [data-icon] { display: block; width: 100%; height: 100%; pointer-events: none; }
+      [data-action] [data-icon] { display: block; width: 100%; height: 100%; pointer-events: none; }
       [data-panel] {
         position: fixed;
-        width: min(360px, calc(100vw - 24px));
-        max-height: min(50vh, 420px);
-        overflow: auto;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        width: min(380px, calc(100vw - 24px));
+        max-height: min(560px, calc(100vh - 24px));
+        overflow: hidden;
+        border: 1px solid #dddff0;
+        border-radius: 16px;
         background: #fff;
-        color: #1f2937;
-        box-shadow: 0 14px 38px rgba(15, 23, 42, 0.22);
+        color: #141b2f;
+        box-shadow: 0 12px 36px rgba(35, 43, 80, 0.17), 0 2px 6px rgba(35, 43, 80, 0.04);
         pointer-events: auto;
-        font: 400 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font: 400 14px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       }
       .header {
-        position: sticky;
-        top: 0;
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        flex-shrink: 0;
         gap: 12px;
-        padding: 10px 12px;
-        border-bottom: 1px solid #eef2f7;
-        background: inherit;
+        padding: 16px;
+        border-bottom: 1px solid #e7e3f5;
+        background: linear-gradient(120deg, #fff, #fbfaff);
       }
-      [data-title] { font-size: 13px; font-weight: 650; color: #475569; }
+      .panel-logo { width: 34px; height: 34px; flex-shrink: 0; }
+      .panel-heading { min-width: 0; flex: 1; }
+      [data-title] { display: block; font-size: 16px; font-weight: 700; line-height: 1.4; }
+      .panel-subtitle { margin: 3px 0 0; font-size: 11px; line-height: 1.5; color: #8b93b0; }
       [data-close] {
-        width: 26px;
-        height: 26px;
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
         padding: 0;
         border: 0;
-        border-radius: 6px;
+        border-radius: 7px;
         background: transparent;
-        color: #64748b;
+        color: #6c7391;
         cursor: pointer;
-        font-size: 19px;
       }
-      [data-close]:hover { background: #f1f5f9; color: #1f2937; }
-      .body { padding: 13px 14px; overflow-wrap: anywhere; user-select: text; }
-      [data-status] { color: #7c3aed; }
+      [data-close]:hover { background: #f0ebff; color: #6d28d9; }
+      .body {
+        min-height: 0;
+        padding: 12px;
+        overflow: auto;
+        overscroll-behavior: contain;
+        overflow-wrap: anywhere;
+        scrollbar-width: thin;
+        scrollbar-color: #b2b6c8 #f3f4f9;
+        user-select: text;
+      }
+      .body::-webkit-scrollbar { width: 6px; }
+      .body::-webkit-scrollbar-track { background: #f3f4f9; border-radius: 6px; }
+      .body::-webkit-scrollbar-thumb { background: #b2b6c8; border-radius: 6px; }
+      .result-card {
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #f7f5ff, #f8faff);
+      }
+      [data-status] { padding: 4px 0; color: #7c3aed; }
       [data-status]::before {
         content: "";
         display: inline-block;
-        width: 12px;
-        height: 12px;
+        width: 13px;
+        height: 13px;
         margin-right: 8px;
         vertical-align: -1px;
-        border: 2px solid rgba(124, 58, 237, 0.25);
+        border: 2px solid rgba(124, 58, 237, 0.2);
         border-top-color: #7c3aed;
         border-radius: 50%;
         animation: selection-spin 800ms linear infinite;
       }
-      [data-result] { white-space: pre-wrap; }
-      [data-error] { color: #b42318; }
+      [data-result] p { margin: 0; white-space: pre-wrap; }
+      [data-result] p + p, [data-result] .result-list + p { margin-top: 12px; }
+      [data-result] h3 {
+        margin: 0;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e2def5;
+        color: inherit;
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+      [data-result] p + h3, [data-result] .result-list + h3 { margin-top: 16px; }
+      .result-list { margin: 0; padding: 0; list-style: none; }
+      .result-list li {
+        display: grid;
+        grid-template-columns: 26px minmax(0, 1fr);
+        align-items: start;
+        gap: 12px;
+        padding: 12px 0;
+      }
+      .result-list li + li { border-top: 1px solid #e6e4f3; }
+      .result-list li:last-child { padding-bottom: 0; }
+      .result-marker {
+        display: grid;
+        place-items: center;
+        min-width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #eee8ff;
+        color: #6d28d9;
+        font-size: 14px;
+        font-weight: 650;
+        line-height: 1;
+      }
+      .result-item-text { min-width: 0; white-space: pre-wrap; }
+      [data-error] { color: #b42318; white-space: pre-wrap; }
+      [data-result]:not([hidden]) + [data-error]:not([hidden]) { margin-top: 12px; }
       .footer {
         display: flex;
         align-items: center;
+        flex-shrink: 0;
+        flex-wrap: wrap;
         gap: 8px;
-        padding: 9px 12px;
-        border-top: 1px solid #eef2f7;
+        padding: 12px 16px;
+        border-top: 1px solid #e7e3f5;
+        background: linear-gradient(120deg, #fff, #fbfaff);
       }
-      .footer button,
-      .footer a {
-        min-height: 28px;
-        padding: 5px 9px;
-        border: 1px solid #d8dee8;
-        border-radius: 6px;
+      .footer button, .footer a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 7px 14px;
+        border: 1px solid #d6c7fb;
+        border-radius: 8px;
         background: #fff;
-        color: #475569;
+        color: #6d28d9;
         cursor: pointer;
         text-decoration: none;
       }
-      .footer button:hover,
-      .footer a:hover { background: #f8fafc; color: #312e81; }
+      .footer button:hover, .footer a:hover { background: #f3eeff; border-color: #b89aef; }
       @keyframes selection-spin { to { transform: rotate(360deg); } }
       @media (prefers-color-scheme: dark) {
-        [data-action], [data-panel] {
-          border-color: #475569;
-          background: #172033;
-          color: #e5e7eb;
-        }
-        .header, .footer { border-color: #334155; }
-        [data-title], [data-close] { color: #cbd5e1; }
-        [data-close]:hover, .footer button:hover, .footer a:hover { background: #263247; }
-        .footer button, .footer a {
-          border-color: #475569;
-          background: #1e293b;
-          color: #dbe3ee;
-        }
+        [data-action], [data-panel] { border-color: #40465f; background: #191e2f; color: #eef0f9; }
+        .header, .footer { background: #1d2236; border-color: #373b55; }
+        .panel-subtitle, [data-close] { color: #a3adc5; }
+        [data-close]:hover { background: #332947; color: #d4baff; }
+        .result-card { background: linear-gradient(135deg, #242337, #212838); }
+        [data-result] h3, .result-list li + li { border-color: #3b3b55; }
+        .result-marker { background: #3b2a5b; color: #d6baff; }
+        [data-status] { color: #c4b5fd; }
+        .body { scrollbar-color: #606780 #24293a; }
+        .footer button, .footer a { border-color: #614689; background: #252137; color: #d6baff; }
+        .footer button:hover, .footer a:hover { background: #382b4f; }
         [data-error] { color: #fda29b; }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -683,18 +762,24 @@ function createShadowMarkup(): string {
     </button>
     <section data-panel role="dialog" aria-label="划词翻译结果" hidden>
       <div class="header">
-        <span data-title>划词翻译</span>
-        <button data-close type="button" aria-label="关闭">×</button>
+        <img class="panel-logo" data-icon alt="" />
+        <div class="panel-heading">
+          <span data-title>划词翻译</span>
+          <p class="panel-subtitle">由 AI 提供翻译结果</p>
+        </div>
+        <button data-close type="button" aria-label="关闭">${getIconMarkup('close', 20)}</button>
       </div>
       <div class="body" aria-live="polite">
-        <div data-status hidden></div>
-        <div data-result hidden></div>
-        <div data-error role="alert" hidden></div>
+        <div class="result-card">
+          <div data-status hidden></div>
+          <div data-result hidden></div>
+          <div data-error role="alert" hidden></div>
+        </div>
       </div>
-      <div class="footer">
-        <button data-copy type="button" hidden>复制</button>
-        <button data-retry type="button" hidden>重试</button>
-        <a data-settings target="_blank" rel="noreferrer" hidden>打开设置</a>
+      <div class="footer" data-footer hidden>
+        <button data-copy type="button" hidden>${getIconMarkup('copy')}<span data-copy-label>复制</span></button>
+        <button data-retry type="button" hidden>${getIconMarkup('refresh')}<span>重试</span></button>
+        <a data-settings target="_blank" rel="noreferrer" hidden>${getIconMarkup('settings')}<span>打开设置</span></a>
       </div>
     </section>
   `;
