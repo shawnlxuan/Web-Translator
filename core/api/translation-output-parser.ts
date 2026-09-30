@@ -7,7 +7,7 @@ export function parseNumberedTranslationOutput(
   text: string,
   expectedCount: number,
 ): ParsedTranslationOutput {
-  const normalized = text.trim();
+  const normalized = unwrapNumberedOutputFence(text.trim());
   if (expectedCount <= 0) {
     return { translations: [], missingIndices: [] };
   }
@@ -49,6 +49,13 @@ export function parseNumberedTranslationOutput(
       .map(([index, translation]) => ({ index, text: translation })),
     missingIndices,
   };
+}
+
+function unwrapNumberedOutputFence(text: string): string {
+  const fenced = text.match(/^(`{3,}|~{3,})[\w-]*[ \t]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/);
+  // A complete wrapper around protocol output is formatting, not translated text.
+  // Keep literal fenced content in unnumbered text translations intact.
+  return fenced && /^\s*\[#\d+\]/.test(fenced[2]) ? fenced[2].trim() : text;
 }
 
 function stripElementLabel(text: string): string {

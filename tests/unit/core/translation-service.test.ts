@@ -8,7 +8,8 @@ import {
 } from '../../../core/translation/translation-service';
 import { TextType, type SegmentContext } from '../../../shared/types';
 import { RateLimiter } from '../../../core/api/rate-limiter';
-import { encodeInlineText } from '../../../core/translation/inline-markup';
+import { decodeInlineText, encodeInlineText } from '../../../core/translation/inline-markup';
+import { ProviderError } from '../../../core/api/provider-interface';
 
 function createSnapshot() {
   return createTranslationRunSnapshot({
@@ -56,6 +57,124 @@ function createSentence(
 }
 
 describe('CachedTranslationService', () => {
+  it('repairs only a paragraph with missing markers and reassembles its original text-node positions', async () => {
+    const source = encodeInlineText([' Read ', 'documentation', ' \n', '!']);
+    const cacheSet = vi.fn(async (..._args: Parameters<CacheManager['set']>) => {});
+    const translateBatch = vi.fn(async (input: TranslationRequest) => {
+      if (input.sentences.some((sentence) => sentence.text === source)) {
+        return { translations: [{ index: 0, text: '正常结果' }, { index: 1, text: '阅读文档！' }] };
+      }
+      expect(input.sentences.map((sentence) => sentence.text)).toEqual(['Read', 'documentation']);
+      expect(input.sentences[0].context.siblingContext).toContain('Read documentation');
+      return { translations: [{ index: 1, text: '文档' }, { index: 0, text: '阅读' }] };
+    });
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch }, cache: { get: async () => null, set: cacheSet }, limiter: new RateLimiter(),
+    });
+    const results = await service.translate({
+      sentences: [createSentence('Ordinary sentence.', 4), createSentence(source, 8)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    });
+    expect(results[0].translation).toBe('正常结果');
+    expect(decodeInlineText(results[1].translation, 4)).toEqual([' 阅读 ', '文档', ' \n', '!']);
+    expect(results[1]).toMatchObject({ segmentId: 'segment-8', sentenceIndex: 8 });
+    expect(translateBatch).toHaveBeenCalledTimes(2);
+    expect(cacheSet).toHaveBeenCalledTimes(2);
+    expect(cacheSet.mock.calls.map((call) => call[5])).not.toContain('阅读文档！');
+  });
+
+  it('keeps progressive results flowing while repairing an invalid inline result', async () => {
+    const source = encodeInlineText(['Read ', 'documentation']);
+    const translateBatch = vi.fn(async (_input: TranslationRequest) => ({ translations: [{ index: 0, text: '阅读' }, { index: 1, text: '文档' }] }));
+    const onProgress = vi.fn(async () => {});
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: {
+        translateBatch,
+        async *translateBatchStream() {
+          yield { index: 0, delta: '正常译文', done: true };
+          yield { index: 1, delta: '丢失标记的译文', done: true };
+        },
+      },
+      cache: { get: async () => null, set: async () => {} }, limiter: new RateLimiter(),
+    });
+    await service.translate({
+      sentences: [createSentence('Ordinary.', 4), createSentence(source, 8)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    }, onProgress);
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenNthCalledWith(1, [expect.objectContaining({ translation: '正常译文' })]);
+    expect(onProgress).toHaveBeenNthCalledWith(2, [expect.objectContaining({ translation: encodeInlineText(['阅读 ', '文档']) })]);
+    expect(translateBatch).toHaveBeenCalledOnce();
+    expect(translateBatch.mock.calls[0][0].sentences.map((sentence) => sentence.text)).toEqual(['Read', 'documentation']);
+  });
+
+  it('does not make extra requests when inline markers are already valid', async () => {
+    const translation = encodeInlineText(['阅读 ', '文档']);
+    const translateBatch = vi.fn(async () => ({ translations: [{ index: 0, text: translation }] }));
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch }, cache: { get: async () => null, set: async () => {} }, limiter: new RateLimiter(),
+    });
+    const results = await service.translate({
+      sentences: [createSentence(encodeInlineText(['Read ', 'documentation']), 4)],
+      sourceLang: 'en', targetLang: 'zh-CN',
+    });
+    expect(results[0].translation).toBe(translation);
+    expect(translateBatch).toHaveBeenCalledOnce();
+  });
+
+  it('bounds large repairs to 20 numbered fragments per request', async () => {
+    const fragments = Array.from({ length: 25 }, (_, index) => `Part ${index} `);
+    const source = encodeInlineText(fragments);
+    const translateBatch = vi.fn(async (input: TranslationRequest) => ({
+      translations: input.sentences.map((sentence, index) => ({
+        index, text: sentence.text === source ? 'missing markers' : `译文 ${sentence.text.slice(5)}`,
+      })),
+    }));
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch }, cache: { get: async () => null, set: async () => {} }, limiter: new RateLimiter(),
+    });
+    const results = await service.translate({ sentences: [createSentence(source, 4)], sourceLang: 'en', targetLang: 'zh-CN' });
+    expect(translateBatch.mock.calls.map(([input]) => input.sentences.length)).toEqual([1, 20, 5]);
+    expect(decodeInlineText(results[0].translation, 25)).toEqual(fragments.map((_, index) => `译文 ${index} `));
+  });
+
+  it('cancels a multi-request repair without dispatching its next fragment batch or caching partial results', async () => {
+    const source = encodeInlineText(Array.from({ length: 25 }, (_, index) => `Part ${index}`));
+    const controller = new AbortController();
+    const cacheSet = vi.fn(async () => {});
+    const translateBatch = vi.fn(async (input: TranslationRequest) => {
+      if (input.sentences[0].text === source) return { translations: [{ index: 0, text: 'missing markers' }] };
+      controller.abort();
+      return { translations: input.sentences.map(({ index }) => ({ index, text: '译文' })) };
+    });
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch }, cache: { get: async () => null, set: cacheSet },
+      limiter: new RateLimiter(), signal: controller.signal,
+    });
+    await expect(service.translate({ sentences: [createSentence(source, 4)], sourceLang: 'en', targetLang: 'zh-CN' }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(translateBatch).toHaveBeenCalledTimes(2);
+    expect(cacheSet).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed repair request without repeating the successful original request', async () => {
+    const source = encodeInlineText(['Read ', 'documentation']);
+    let repairAttempts = 0;
+    const translateBatch = vi.fn(async (input: TranslationRequest) => {
+      if (input.sentences[0].text === source) return { translations: [{ index: 0, text: 'missing markers' }] };
+      if (++repairAttempts === 1) throw new ProviderError('Test', 429, 'limited');
+      return { translations: [{ index: 0, text: '阅读' }, { index: 1, text: '文档' }] };
+    });
+    const service = new CachedTranslationService(createSnapshot(), {
+      provider: { translateBatch }, cache: { get: async () => null, set: async () => {} },
+      limiter: new RateLimiter({ maxDelayMs: 0 }),
+    });
+    const results = await service.translate({ sentences: [createSentence(source, 4)], sourceLang: 'en', targetLang: 'zh-CN' });
+    expect(results[0].translation).toBe(encodeInlineText(['阅读 ', '文档']));
+    expect(translateBatch).toHaveBeenCalledTimes(3);
+    expect(translateBatch.mock.calls.filter(([input]) => input.sentences[0].text === source)).toHaveLength(1);
+  });
+
   it('publishes cached and completed sentences before the batch finishes, without exposing unfinished deltas', async () => {
     const partialReached = deferred<void>();
     const finishFirst = deferred<void>();
@@ -153,12 +272,14 @@ describe('CachedTranslationService', () => {
 
   it('does not cache a response that lost its inline text-node boundaries', async () => {
     const set = vi.fn(async () => {});
+    const translateBatch = vi.fn(async () => ({ translations: [{ index: 0, text: '阅读文档' }] }));
     const service = new CachedTranslationService(createSnapshot(), {
-      provider: { translateBatch: async () => ({ translations: [{ index: 0, text: '阅读文档' }] }) },
+      provider: { translateBatch },
       cache: { get: async () => null, set }, limiter: new RateLimiter(),
     });
     await expect(service.translate({ sentences: [createSentence(encodeInlineText(['Read ', 'documentation']), 0)], sourceLang: 'en', targetLang: 'zh-CN' })).rejects.toThrow('内联文本标记');
     expect(set).not.toHaveBeenCalled();
+    expect(translateBatch).toHaveBeenCalledTimes(2);
   });
 
   it('shares concurrency permits across different translation services', async () => {

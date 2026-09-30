@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildBatchPrompt, buildTranslationPrompt } from '../../../core/api/prompt-templates';
 import type { SegmentContext } from '../../../shared/types';
 import { TextType } from '../../../shared/types';
+import { encodeInlineText } from '../../../core/translation/inline-markup';
 
 describe('buildTranslationPrompt', () => {
   it('keeps all configured neighboring sentences in batch prompts', () => {
@@ -20,6 +21,26 @@ describe('buildTranslationPrompt', () => {
     beforeSentences: ['Previous sentence one.', 'Previous sentence two.'],
     afterSentences: ['Next sentence one.', 'Next sentence two.'],
   };
+
+  it('keeps required inline-output metadata even when a custom prompt asks for translated content only', () => {
+    const { systemPrompt, userMessage } = buildBatchPrompt(
+      [{ index: 0, text: encodeInlineText(['Read ', 'documentation', ' ']), context: baseContext }],
+      'en', 'zh-CN', baseContext, 'Output only translated content.',
+    );
+    expect(systemPrompt).toContain('Output only translated content.');
+    expect(systemPrompt).toContain('required output metadata');
+    expect(userMessage).toContain('Keep empty or whitespace-only pairs too.');
+    expect(userMessage).toContain('[#1] [[TR:0]]<translation>[[/TR:0]][[TR:1]]<translation>[[/TR:1]][[TR:2]]<translation>[[/TR:2]]');
+  });
+
+  it('does not request DOM markers for plain text or fragment repair requests', () => {
+    const { systemPrompt, userMessage } = buildBatchPrompt(
+      [{ index: 0, text: 'Read documentation', context: baseContext }],
+      'en', 'zh-CN', baseContext,
+    );
+    expect(systemPrompt).not.toContain('[[TR:');
+    expect(userMessage).not.toContain('[[TR:');
+  });
 
   it('builds a prompt with system and user messages', () => {
     const { systemPrompt, userMessage } = buildTranslationPrompt(

@@ -9,6 +9,7 @@ import { createProviderCacheIdentity } from '../cache/cache-key';
 import type { SegmentContext, TranslationResult } from '../../shared/types';
 import type { TranslationRunSnapshot } from './translation-run';
 import { decodeInlineText, getInlineTextCount } from './inline-markup';
+import { repairInlineTranslations } from './inline-translation-repair';
 
 export interface SerializedTranslationSentence {
   segmentId: string;
@@ -91,8 +92,8 @@ export class CachedTranslationService {
       .filter(({ inputIndex }) => !results.has(inputIndex));
 
     if (misses.length > 0) {
+      const providerRequest = this.createProviderRequest(request, misses);
       const response = await this.dependencies.limiter.execute(async () => {
-        const providerRequest = this.createProviderRequest(request, misses);
         const provider = this.dependencies.provider;
         if (!onProgress || !provider.translateBatchStream) {
           return provider.translateBatch(providerRequest);
@@ -107,7 +108,7 @@ export class CachedTranslationService {
           const text = (translations.get(delta.index) ?? '') + delta.delta;
           translations.set(delta.index, text);
           if (delta.done) {
-            const completed = this.resolveApiResults({ translations: [{ index: delta.index, text }] }, misses);
+            const completed = this.resolveApiResults({ translations: [{ index: delta.index, text }] }, misses, true);
             await publish(completed.map(({ source, translation }) => ({
               inputIndex: source.inputIndex,
               result: toResult(source.sentence, translation, false),
@@ -117,7 +118,21 @@ export class CachedTranslationService {
         return { translations: Array.from(translations, ([index, text]) => ({ index, text })) };
       }, signal);
       signal?.throwIfAborted();
-      const apiResults = this.resolveApiResults(response, misses);
+      const apiResults = this.resolveApiResults(response, misses, true);
+      const resolvedInputs = new Set(apiResults.map(({ source }) => source.inputIndex));
+      const invalidInline = providerRequest.sentences.filter((sentence, index) => (
+        getInlineTextCount(sentence.text) > 0 && !resolvedInputs.has(misses[index].inputIndex)
+      ));
+      if (invalidInline.length > 0) {
+        const repaired = await repairInlineTranslations(
+          { ...providerRequest, sentences: invalidInline },
+          (fragmentRequest) => this.dependencies.limiter.execute(
+            () => this.dependencies.provider.translateBatch(fragmentRequest), signal,
+          ),
+        );
+        apiResults.push(...this.resolveApiResults(repaired, misses));
+      }
+      signal?.throwIfAborted();
 
       for (const { source, translation } of apiResults) {
         results.set(
@@ -181,6 +196,7 @@ export class CachedTranslationService {
       sentence: SerializedTranslationSentence;
       inputIndex: number;
     }>,
+    allowInvalidInline: boolean = false,
   ): Array<{
     source: {
       sentence: SerializedTranslationSentence;
@@ -201,6 +217,7 @@ export class CachedTranslationService {
       }
       const count = getInlineTextCount(misses[translation.index].sentence.sentence);
       if (count && !decodeInlineText(translation.text, count)) {
+        if (allowInvalidInline) continue;
         throw new Error('译文缺少内联文本标记，已保留网页原文。');
       }
 

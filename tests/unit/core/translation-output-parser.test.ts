@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { parseNumberedTranslationOutput } from '../../../core/api/translation-output-parser';
 
 describe('parseNumberedTranslationOutput', () => {
+  it('removes a Markdown fence around numbered translations without leaving it in the last result', () => {
+    expect(parseNumberedTranslationOutput('```text\n[#1] [[TR:0]]阅读[[/TR:0]][[TR:1]]文档[[/TR:1]]\n[#2] 结束\n```', 2)).toEqual({
+      translations: [
+        { index: 0, text: '[[TR:0]]阅读[[/TR:0]][[TR:1]]文档[[/TR:1]]' },
+        { index: 1, text: '结束' },
+      ],
+      missingIndices: [],
+    });
+  });
+
+  it('keeps literal code fences in unnumbered single-text output', () => {
+    expect(parseNumberedTranslationOutput('```js\nconst value = 1;\n```', 1).translations[0].text)
+      .toBe('```js\nconst value = 1;\n```');
+  });
+
   it('parses complete numbered output after stream content is fully accumulated', () => {
     const result = parseNumberedTranslationOutput(
       '[#1] 第一句完整译文。\n[#2] 第二句完整译文。',

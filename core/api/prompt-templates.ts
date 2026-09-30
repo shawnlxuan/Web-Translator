@@ -5,6 +5,9 @@
 
 import type { SegmentContext } from '../../shared/types';
 import { DEFAULT_SYSTEM_PROMPT_TEMPLATE } from '../../shared/constants';
+import { encodeInlineText, getInlineTextCount } from '../translation/inline-markup';
+
+const INLINE_MARKER_RULE = 'Preserve every [[TR:n]]...[[/TR:n]] text-node marker exactly, including its number and order. Translate the text inside each pair in the context of the whole paragraph; never omit a pair or move text outside the markers. Keep empty or whitespace-only pairs too. These markers are required output metadata, not content to translate or remove.';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -24,7 +27,8 @@ export function buildTranslationPrompt(
   const sourceName = getLanguageName(sourceLang);
   const targetName = getLanguageName(targetLang);
 
-  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate);
+  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate)
+    + (getInlineTextCount(sentence) ? `\n\nRequired webpage output format:\n${INLINE_MARKER_RULE}` : '');
   const userMessage = buildUserMessage(sentence, context, targetName);
 
   return { systemPrompt, userMessage };
@@ -44,7 +48,10 @@ export function buildBatchPrompt(
   const sourceName = getLanguageName(sourceLang);
   const targetName = getLanguageName(targetLang);
 
-  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate);
+  const inlineCounts = sentences.map(({ text }) => getInlineTextCount(text));
+  const hasInlineText = inlineCounts.some((count) => count > 0);
+  const systemPrompt = buildSystemPrompt(sourceName, targetName, customPromptTemplate)
+    + (hasInlineText ? `\n\nRequired webpage output format:\n${INLINE_MARKER_RULE}` : '');
 
   const parts: string[] = [];
 
@@ -63,7 +70,7 @@ export function buildBatchPrompt(
   parts.push(`Translate each of the following sentences from ${sourceName} to ${targetName}.`);
   parts.push('Preserve the numbering. Return ONLY the translations.');
   parts.push('Do not include element labels such as [link], [heading], or [button] in the output.');
-  parts.push('Preserve every [[TR:n]]...[[/TR:n]] text-node marker exactly, including its number and order. Translate the text inside each pair in the context of the whole paragraph; never omit a pair or move text outside the markers.');
+  if (hasInlineText) parts.push(INLINE_MARKER_RULE);
   parts.push('');
 
   for (const s of sentences) {
@@ -80,7 +87,10 @@ export function buildBatchPrompt(
   parts.push('');
   parts.push('Output format:');
   for (let i = 0; i < sentences.length; i++) {
-    parts.push(`[#${i + 1}] <translation>`);
+    const shape = inlineCounts[i]
+      ? encodeInlineText(Array.from({ length: inlineCounts[i] }, () => '<translation>'))
+      : '<translation>';
+    parts.push(`[#${i + 1}] ${shape}`);
   }
 
   return { systemPrompt, userMessage: parts.join('\n') };
