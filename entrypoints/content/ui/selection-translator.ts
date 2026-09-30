@@ -569,7 +569,7 @@ function createShadowMarkup(): string {
         width: ${ACTION_SIZE}px;
         height: ${ACTION_SIZE}px;
         padding: 3px;
-        border: 1px solid rgba(99, 102, 241, 0.28);
+        border: 1px solid rgba(124, 58, 237, 0.28);
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.97);
         box-shadow: 0 5px 18px rgba(15, 23, 42, 0.2);
@@ -579,7 +579,7 @@ function createShadowMarkup(): string {
       [data-action]:hover,
       [data-action]:focus-visible {
         transform: translateY(-1px);
-        border-color: rgba(99, 102, 241, 0.55);
+        border-color: rgba(124, 58, 237, 0.55);
         box-shadow: 0 7px 22px rgba(15, 23, 42, 0.25);
         outline: none;
       }
@@ -622,7 +622,7 @@ function createShadowMarkup(): string {
       }
       [data-close]:hover { background: #f1f5f9; color: #1f2937; }
       .body { padding: 13px 14px; overflow-wrap: anywhere; user-select: text; }
-      [data-status] { color: #6366f1; }
+      [data-status] { color: #7c3aed; }
       [data-status]::before {
         content: "";
         display: inline-block;
@@ -630,8 +630,8 @@ function createShadowMarkup(): string {
         height: 12px;
         margin-right: 8px;
         vertical-align: -1px;
-        border: 2px solid rgba(99, 102, 241, 0.25);
-        border-top-color: #6366f1;
+        border: 2px solid rgba(124, 58, 237, 0.25);
+        border-top-color: #7c3aed;
         border-radius: 50%;
         animation: selection-spin 800ms linear infinite;
       }

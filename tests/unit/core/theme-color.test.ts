@@ -2,15 +2,18 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('extension theme colors', () => {
-  it('shares the original purple brand palette across popup and options', () => {
+  it('shares the icon’s purple brand palette across popup and options', () => {
     const theme = readFileSync('shared/theme.css', 'utf8');
     const popupEntry = readFileSync('entrypoints/popup/main.tsx', 'utf8');
     const optionsEntry = readFileSync('entrypoints/options/main.tsx', 'utf8');
     const popupStyles = readFileSync('entrypoints/popup/styles.css', 'utf8');
     const optionsStyles = readFileSync('entrypoints/options/styles.css', 'utf8');
+    const icon = readFileSync('public/content-ui/ai_translate_icon.svg', 'utf8').toLowerCase();
 
-    expect(theme).toContain('--tr-brand: #6366f1');
-    expect(theme).toContain('--tr-brand-hover: #4f46e5');
+    expect(theme).toContain('--tr-brand: #7c3aed');
+    expect(theme).toContain('--tr-brand-hover: #6d28d9');
+    expect(icon).toContain('#7c3aed');
+    expect(icon).toContain('#6d28d9');
     expect(popupEntry).toContain("import '../../shared/theme.css'");
     expect(optionsEntry).toContain("import '../../shared/theme.css'");
     expect(popupStyles).toContain('background: var(--tr-brand)');
@@ -26,7 +29,7 @@ describe('extension theme colors', () => {
     );
 
     expect(contentStyles).toMatch(
-      /\.tr-block-translation\s*\{[^}]*width: 100%;[^}]*background-color: rgba\(99, 102, 241, 0\.06\)/s,
+      /\.tr-block-translation\s*\{[^}]*width: 100%;[^}]*background-color: rgba\(124, 58, 237, 0\.06\)/s,
     );
     expect(contentStyles).toContain("content: '·'");
     expect(contentStyles).toContain("content: '↳'");

@@ -6,6 +6,7 @@ import { resolveActiveProvider } from '../../shared/provider-presets';
 import LanguageSelector from './components/LanguageSelector';
 import ModeToggle from './components/ModeToggle';
 import TranslateButton from './components/TranslateButton';
+import Icon from '../../shared/components/Icon';
 import {
   ensureContentScript,
   groupProviderProfiles,
@@ -270,107 +271,122 @@ const App: React.FC = () => {
           <h1 className="app-title">网页翻译</h1>
         </div>
         <button className="header-settings" onClick={() => chrome.runtime.openOptionsPage()}>
-          设置
+          <Icon name="settings" size={19} />设置
         </button>
       </header>
 
       <div className="main-tabs" role="tablist" aria-label="翻译类型">
-        <button role="tab" aria-selected={activeTab === 'page'} className={activeTab === 'page' ? 'active' : ''}
-          onClick={() => setActiveTab('page')}>网页翻译</button>
-        <button role="tab" aria-selected={activeTab === 'text'} className={activeTab === 'text' ? 'active' : ''}
-          onClick={() => setActiveTab('text')}>文本翻译</button>
+        <button role="tab" id="page-tab" aria-controls="page-panel" aria-selected={activeTab === 'page'}
+          className={activeTab === 'page' ? 'active' : ''}
+          onClick={() => setActiveTab('page')}><Icon name="globe" size={21} />网页翻译</button>
+        <button role="tab" id="text-tab" aria-controls="text-panel" aria-selected={activeTab === 'text'}
+          className={activeTab === 'text' ? 'active' : ''}
+          onClick={() => setActiveTab('text')}><Icon name="file" size={21} />文本翻译</button>
       </div>
 
-      <section className="shared-controls">
-        <label className="provider-control">
-          <span>API</span>
-          <select value={settings.activeProviderId}
-            onChange={(event) => void selectProvider(event.target.value as ProviderId)}>
-            <optgroup label="固定提供商">
-              {providerGroups.builtins.map((profile) => (
-                <option key={profile.id} value={profile.id}>{profile.name}</option>
-              ))}
-            </optgroup>
-            {providerGroups.custom.length > 0 && (
-              <optgroup label="自定义 API">
-                {providerGroups.custom.map((profile) => (
-                  <option key={profile.id} value={profile.id}>{profile.name}</option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </label>
-        <div className="provider-summary">
-          <span title={activeProvider.model}>{activeProvider.model || '未设置模型'}</span>
-          <span className={providerReady ? 'ready' : 'missing'}>{providerReady ? '可用' : '未配置'}</span>
-        </div>
-      </section>
+      <section className="tab-panel" role="tabpanel" id={`${activeTab}-panel`} aria-labelledby={`${activeTab}-tab`}>
+        <div className="popup-card">
+          <section className="shared-controls">
+            <label className="provider-control">
+              <span className="control-label">API</span>
+              <select value={settings.activeProviderId}
+                onChange={(event) => void selectProvider(event.target.value as ProviderId)}>
+                <optgroup label="固定提供商">
+                  {providerGroups.builtins.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name}</option>
+                  ))}
+                </optgroup>
+                {providerGroups.custom.length > 0 && (
+                  <optgroup label="自定义 API">
+                    {providerGroups.custom.map((profile) => (
+                      <option key={profile.id} value={profile.id}>{profile.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+            <div className={providerReady ? 'provider-summary ready' : 'provider-summary missing'}>
+              <span className="provider-model" title={activeProvider.model}>
+                <span className="status-dot" aria-hidden="true" />
+                <span className="provider-model-name">{activeProvider.model || '未设置模型'}</span>
+              </span>
+              <span className="provider-status">{providerReady ? '可用' : '未配置'}</span>
+            </div>
+          </section>
 
-      <div className="language-grid">
-        <LanguageSelector label="源语言" value={sourceLang} languages={SUPPORTED_LANGUAGES} onChange={changeSourceLanguage} />
-        <LanguageSelector label="目标" value={targetLang}
-          languages={SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto')}
-          onChange={changeTargetLanguage} />
-      </div>
-
-      {activeTab === 'page' ? (
-        <section className="tab-panel" role="tabpanel">
-          <ModeToggle value={displayMode} onChange={(mode) => void toggleMode(mode)} />
-          {!providerReady && <ProviderWarning />}
-          {pageError && <div className="error-box" role="alert">{pageError}</div>}
-          <TranslateButton
-            isTranslating={pageBusy}
-            isTranslated={pageComplete}
-            hasApiKey={providerReady}
-            progress={pageProgress}
-            onClick={() => void togglePageTranslation()}
-          />
-          {(pageBusy || pageComplete) && (
-            <Progress progress={pageProgress} complete={pageComplete} />
-          )}
-        </section>
-      ) : (
-        <section className="tab-panel manual-panel" role="tabpanel">
-          <div className="manual-input-wrap">
-            <textarea
-              value={manualText}
-              onChange={(event) => {
-                manualRequestId.current++;
-                manualInFlight.current = false;
-                setManualLoading(false);
-                setManualResult('');
-                setManualText(truncateToCodePoints(event.target.value, MANUAL_LIMIT));
-                setManualError(null);
-              }}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                  event.preventDefault();
-                  void translateText();
-                }
-              }}
-              rows={6}
-              placeholder="输入单词或句子"
-              aria-label="要翻译的文字"
-            />
-            <span className="character-count">{Array.from(manualText).length}/{MANUAL_LIMIT}</span>
+          <div className="language-grid">
+            <LanguageSelector label="源语言" value={sourceLang} languages={SUPPORTED_LANGUAGES} onChange={changeSourceLanguage} />
+            <LanguageSelector label="目标" value={targetLang}
+              languages={SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto')}
+              onChange={changeTargetLanguage} />
           </div>
-          {!providerReady && <ProviderWarning />}
-          {manualError && <div className="error-box" role="alert">{manualError}</div>}
-          <button className="manual-translate-btn" disabled={!providerReady || manualLoading || !manualText.trim()}
-            onClick={() => void translateText()}>
-            {manualLoading ? '翻译中...' : '翻译'}
-          </button>
-          {manualResult && (
-            <div className="manual-result">
-              <div className="manual-result-header">
-                <span>译文</span>
-                <button onClick={() => void copyResult()}>{copyLabel}</button>
-              </div>
-              <div className="manual-result-text">{manualResult}</div>
+
+          {activeTab === 'page' ? <ModeToggle value={displayMode} onChange={(mode) => void toggleMode(mode)} /> : (
+            <div className="manual-input-wrap">
+              <textarea
+                value={manualText}
+                onChange={(event) => {
+                  manualRequestId.current++;
+                  manualInFlight.current = false;
+                  setManualLoading(false);
+                  setManualResult('');
+                  setManualText(truncateToCodePoints(event.target.value, MANUAL_LIMIT));
+                  setManualError(null);
+                }}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    void translateText();
+                  }
+                }}
+                rows={5}
+                placeholder="输入单词或句子"
+                aria-label="要翻译的文字"
+              />
+              <span className="character-count">{Array.from(manualText).length}/{MANUAL_LIMIT}</span>
             </div>
           )}
-        </section>
-      )}
+        </div>
+
+        {activeTab === 'page' ? (
+          <div className="panel-actions">
+            {!providerReady && <ProviderWarning />}
+            {pageError && <div className="error-box" role="alert">{pageError}</div>}
+            <TranslateButton
+              isTranslating={pageBusy}
+              isTranslated={pageComplete}
+              hasApiKey={providerReady}
+              progress={pageProgress}
+              onClick={() => void togglePageTranslation()}
+            />
+            {(pageBusy || pageComplete) && (
+              <Progress progress={pageProgress} complete={pageComplete} />
+            )}
+          </div>
+        ) : (
+          <div className="panel-actions manual-panel">
+            {!providerReady && <ProviderWarning />}
+            {manualError && <div className="error-box" role="alert">{manualError}</div>}
+            <button className="manual-translate-btn" disabled={!providerReady || manualLoading || !manualText.trim()}
+              aria-busy={manualLoading}
+              onClick={() => void translateText()}>
+              <span className="button-content">
+                {manualLoading ? <span className="spinner" /> : <Icon name="translate" size={23} />}
+                {manualLoading ? '翻译中...' : '翻译'}
+              </span>
+            </button>
+            {manualResult && (
+              <div className="manual-result">
+                <div className="manual-result-header">
+                  <span>译文</span>
+                  <button onClick={() => void copyResult()}>{copyLabel}</button>
+                </div>
+                <div className="manual-result-text">{manualResult}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
     </main>
   );
 };

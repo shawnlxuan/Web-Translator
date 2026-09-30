@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { DisplayMode, Settings } from '../../shared/types';
 import { DEFAULT_SETTINGS, DEFAULT_SYSTEM_PROMPT_TEMPLATE, SUPPORTED_LANGUAGES } from '../../shared/constants';
 import ApiConfig from './components/ApiConfig';
+import Icon from '../../shared/components/Icon';
+import { SaveButton, SectionHeading } from './components/SectionHeading';
 
 const APP_ICON_URL = chrome.runtime.getURL('content-ui/ai_translate_icon.svg');
 
@@ -54,7 +56,7 @@ const App: React.FC = () => {
           </div>
         </div>
         {saveMessage && (
-          <div className={saveMessage === '已保存' ? 'save-status success' : 'save-status error'}>
+          <div role="status" className={saveMessage === '已保存' ? 'save-status success' : 'save-status error'}>
             {saveMessage}
           </div>
         )}
@@ -82,21 +84,19 @@ const PromptSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
   return (
     <section className="section">
       <div className="section-header">
-        <h2 className="section-title">提示词</h2>
+        <SectionHeading icon="file" title="提示词" description="自定义翻译提示词，控制翻译风格和要求" />
         <div className="section-actions">
           <button className="secondary-btn" onClick={() => setPrompt(DEFAULT_SYSTEM_PROMPT_TEMPLATE)}>
-            恢复默认
+            <Icon name="refresh" size={17} />恢复默认
           </button>
-          <button className="save-btn" onClick={() => void onSave({ customPromptTemplate: prompt })}>
-            保存
-          </button>
+          <SaveButton onClick={() => void onSave({ customPromptTemplate: prompt })} />
         </div>
       </div>
       <textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
         className="form-textarea"
-        rows={11}
+        rows={7}
         spellCheck={false}
         aria-label="系统提示词模板"
       />
@@ -125,34 +125,44 @@ const TranslationSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
   return (
     <section className="section">
       <div className="section-header">
-        <h2 className="section-title">翻译</h2>
-        <button className="save-btn" onClick={() => void save()}>保存</button>
+        <SectionHeading icon="settings" title="翻译" description="设置翻译的基本行为和输出格式" />
+        <SaveButton onClick={() => void save()} />
       </div>
       <div className="settings-grid">
         <label className="form-group">
           <span className="form-label">默认目标语言</span>
-          <select value={targetLang} onChange={(event) => setTargetLang(event.target.value)} className="form-select">
-            {SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto').map((language) => (
-              <option key={language.code} value={language.code}>{language.name}</option>
-            ))}
-          </select>
+          <span className="input-with-icon"><Icon name="globe" size={18} />
+            <select value={targetLang} onChange={(event) => setTargetLang(event.target.value)} className="form-select">
+              {SUPPORTED_LANGUAGES.filter((language) => language.code !== 'auto').map((language) => (
+                <option key={language.code} value={language.code}>{language.name}</option>
+              ))}
+            </select>
+          </span>
         </label>
         <label className="form-group">
           <span className="form-label">默认显示模式</span>
-          <select value={displayMode} onChange={(event) => setDisplayMode(event.target.value as DisplayMode)} className="form-select">
-            <option value="bilingual">原文 + 译文</option>
-            <option value="replace">仅译文</option>
-          </select>
+          <span className="input-with-icon"><Icon name="file" size={18} />
+            <select value={displayMode} onChange={(event) => setDisplayMode(event.target.value as DisplayMode)} className="form-select">
+              <option value="bilingual">原文 + 译文</option>
+              <option value="replace">仅译文</option>
+            </select>
+          </span>
         </label>
         <label className="form-group">
           <span className="form-label">上下文窗口</span>
-          <input type="number" min={0} max={10} value={contextWindowSize}
-            onChange={(event) => setContextWindowSize(Number(event.target.value))} className="form-input" />
+          <span className="input-with-icon"><Icon name="hash" size={18} />
+            <input type="number" min={0} max={10} value={contextWindowSize}
+              onChange={(event) => setContextWindowSize(Number(event.target.value))} className="form-input" />
+          </span>
+          <small className="field-hint">用于提供上下文的前后段落数量</small>
         </label>
         <label className="form-group">
           <span className="form-label">每批句子数</span>
-          <input type="number" min={1} max={20} value={batchSize}
-            onChange={(event) => setBatchSize(Number(event.target.value))} className="form-input" />
+          <span className="input-with-icon"><Icon name="layers" size={18} />
+            <input type="number" min={1} max={20} value={batchSize}
+              onChange={(event) => setBatchSize(Number(event.target.value))} className="form-input" />
+          </span>
+          <small className="field-hint">每次发送给模型的句子数量，范围 1–20</small>
         </label>
       </div>
     </section>
@@ -175,39 +185,47 @@ const AdvancedSettings: React.FC<SectionProps> = ({ settings, onSave }) => {
   return (
     <section className="section">
       <div className="section-header">
-        <h2 className="section-title">高级</h2>
-        <button className="save-btn" onClick={() => void onSave({
+        <SectionHeading icon="sliders" title="高级" description="性能优化和其他高级选项" />
+        <SaveButton onClick={() => void onSave({
           cacheTTLDays,
           maxConcurrentCalls,
           enableMutationObserver,
           showSelectionTranslateButton,
-        })}>保存</button>
+        })} />
       </div>
       <div className="settings-grid">
         <label className="form-group">
           <span className="form-label">缓存天数</span>
-          <input type="number" min={1} max={365} value={cacheTTLDays}
-            onChange={(event) => setCacheTTLDays(Number(event.target.value))} className="form-input" />
+          <span className="input-with-icon"><Icon name="clock" size={18} />
+            <input type="number" min={1} max={365} value={cacheTTLDays}
+              onChange={(event) => setCacheTTLDays(Number(event.target.value))} className="form-input" />
+          </span>
+          <small className="field-hint">翻译结果在本地缓存的天数</small>
         </label>
         <label className="form-group">
           <span className="form-label">最大并发调用</span>
-          <input type="number" min={1} max={10} value={maxConcurrentCalls}
-            onChange={(event) => setMaxConcurrentCalls(Number(event.target.value))} className="form-input" />
+          <span className="input-with-icon"><Icon name="link" size={18} />
+            <input type="number" min={1} max={10} value={maxConcurrentCalls}
+              onChange={(event) => setMaxConcurrentCalls(Number(event.target.value))} className="form-input" />
+          </span>
+          <small className="field-hint">同时进行的 API 调用数量，范围 1–10</small>
         </label>
       </div>
-      <label className="form-checkbox">
-        <input type="checkbox" checked={enableMutationObserver}
-          onChange={(event) => setEnableMutationObserver(event.target.checked)} />
-        <span>自动翻译动态新增内容</span>
-      </label>
-      <label className="form-checkbox checkbox-with-note">
-        <input type="checkbox" checked={showSelectionTranslateButton}
-          onChange={(event) => setShowSelectionTranslateButton(event.target.checked)} />
-        <span>
-          划词后显示翻译按钮
-          <small>关闭后仍可使用 Alt+Shift+T 或右键菜单翻译所选文本</small>
-        </span>
-      </label>
+      <div className="checkbox-grid">
+        <label className="form-checkbox checkbox-with-note">
+          <input type="checkbox" checked={enableMutationObserver}
+            onChange={(event) => setEnableMutationObserver(event.target.checked)} />
+          <span>自动翻译动态新增内容<small>自动检测并翻译页面中动态加载的新内容</small></span>
+        </label>
+        <label className="form-checkbox checkbox-with-note">
+          <input type="checkbox" checked={showSelectionTranslateButton}
+            onChange={(event) => setShowSelectionTranslateButton(event.target.checked)} />
+          <span>
+            划词后显示翻译按钮
+            <small>关闭后仍可使用 Alt+Shift+T 或右键菜单翻译所选文本</small>
+          </span>
+        </label>
+      </div>
     </section>
   );
 };

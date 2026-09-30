@@ -44,7 +44,7 @@
   padding: 0.16em 0.52em;
   border: 0;
   border-radius: 2px;
-  background-color: rgba(99, 102, 241, 0.06);
+  background-color: rgba(124, 58, 237, 0.06);
 }
 
 .tr-inline-right-translation {
@@ -256,6 +256,6 @@
 
 /* Translation highlight on hover */
 .tr-translated:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(124, 58, 237, 0.08);
   border-radius: 2px;
 }

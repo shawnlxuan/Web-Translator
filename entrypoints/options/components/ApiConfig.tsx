@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProviderId, ProviderProfile, Settings } from '../../../shared/types';
 import { isQwenMtModel } from '../../../shared/provider-models';
+import Icon from '../../../shared/components/Icon';
+import ProviderIcon from './ProviderIcon';
+import { SaveButton, SectionHeading } from './SectionHeading';
 import {
   createCustomProviderProfile,
   normalizeEndpoint,
@@ -31,6 +34,17 @@ const BUILTIN_LABELS: Record<string, string> = {
   minimax: 'MiniMax',
 };
 
+const PROVIDER_DESCRIPTIONS: Record<string, string> = {
+  openai: '配置 OpenAI 模型，用于网页和文本翻译',
+  anthropic: '配置 Claude 模型，使用 Anthropic API',
+  deepseek: '配置 DeepSeek 模型，用于网页和文本翻译',
+  glm: '配置智谱 GLM 模型，用于网页和文本翻译',
+  qwen: '阿里云通义千问大模型，支持多语言与翻译任务',
+  kimi: '配置 Kimi 模型，用于网页和文本翻译',
+  mimo: '配置小米 MiMo 模型，用于网页和文本翻译',
+  minimax: '配置 MiniMax 模型，用于网页和文本翻译',
+};
+
 const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
   const initialSignature = providerSignature(settings);
   const persistedSignature = useRef(initialSignature);
@@ -42,7 +56,10 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
   const [testing, setTesting] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const [showApiKey, setShowApiKey] = useState(false);
   const requestGeneration = useRef(0);
+
+  useEffect(() => setShowApiKey(false), [selectedId]);
 
   const invalidateRequests = () => {
     requestGeneration.current++;
@@ -219,30 +236,32 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
   return (
     <section className="section api-section">
       <div className="section-header">
-        <h2 className="section-title">API 提供商</h2>
-        <button className="save-btn" onClick={() => void save()}>保存</button>
+        <SectionHeading icon="database" title="API 提供商" description="选择并配置你要使用的翻译服务" />
+        <SaveButton onClick={() => void save()} />
       </div>
 
       <div className="provider-editor">
         <aside className="provider-list" aria-label="API 提供商列表">
-          <div className="provider-list-label">固定</div>
           {builtins.map((profile) => (
             <button key={profile.id} className={profile.id === selected.id ? 'provider-item active' : 'provider-item'}
+              aria-pressed={profile.id === selected.id}
               onClick={() => { invalidateRequests(); setSelectedId(profile.id); setMessage(null); }}>
-              <span>{profile.preset ? BUILTIN_LABELS[profile.preset] : profile.name}</span>
+              <ProviderIcon preset={profile.preset} name={profile.name} />
+              <span className="provider-item-name">{profile.preset ? BUILTIN_LABELS[profile.preset] : profile.name}</span>
               <span className={profile.apiKey.trim() ? 'status-dot ready' : 'status-dot'} aria-label={profile.apiKey.trim() ? '已配置' : '未配置'} />
             </button>
           ))}
 
           <div className="provider-list-heading">
-            <span className="provider-list-label">自定义</span>
-            <button className="icon-command" title="新增自定义 API" aria-label="新增自定义 API"
-              onClick={() => { setAdding(true); setMessage(null); }}>+</button>
+            <button className="add-provider-btn" title="新增自定义 API" aria-label="新增自定义 API"
+              onClick={() => { setAdding(true); setMessage(null); }}><Icon name="plus" size={21} />自定义</button>
           </div>
           {customProfiles.map((profile) => (
             <button key={profile.id} className={profile.id === selected.id ? 'provider-item active' : 'provider-item'}
+              aria-pressed={profile.id === selected.id}
               onClick={() => { invalidateRequests(); setSelectedId(profile.id); setMessage(null); }}>
-              <span>{profile.name || '未命名 API'}</span>
+              <ProviderIcon name={profile.name} />
+              <span className="provider-item-name">{profile.name || '未命名 API'}</span>
               <span className={profile.apiKey.trim() ? 'status-dot ready' : 'status-dot'} aria-label={profile.apiKey.trim() ? '已配置' : '未配置'} />
             </button>
           ))}
@@ -264,18 +283,17 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
         <div className="provider-detail">
           <div className="provider-detail-header">
             <div>
-              <span className="provider-kind">{selected.kind === 'builtin' ? '固定提供商' : '自定义 API'}</span>
               {selected.kind === 'custom' ? (
                 <input className="provider-name-input" value={selected.name}
                   onChange={(event) => updateName(event.target.value)} aria-label="提供商名称" />
               ) : (
                 <h3>{selected.preset ? BUILTIN_LABELS[selected.preset] : selected.name}</h3>
               )}
+              <p className="provider-description">{selected.preset
+                ? PROVIDER_DESCRIPTIONS[selected.preset]
+                : '配置兼容 OpenAI 协议的自定义翻译服务'}</p>
             </div>
             <div className="provider-detail-actions">
-              {preset && (
-                <a className="secondary-btn link-btn" href={preset.docsUrl} target="_blank" rel="noreferrer">文档</a>
-              )}
               {selected.kind === 'builtin' ? (
                 <button className="secondary-btn" onClick={resetSelected}>恢复官方值</button>
               ) : (
@@ -284,12 +302,21 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
             </div>
           </div>
 
-          <label className="form-group">
-            <span className="form-label">API 密钥</span>
-            <input type="password" value={selected.apiKey}
-              onChange={(event) => updateSelected({ apiKey: event.target.value })}
-              className="form-input" autoComplete="off" />
-          </label>
+          <div className="form-group">
+            <label className="form-label" htmlFor={`api-key-${selected.id}`}>API 密钥</label>
+            <div className="password-field">
+              <input id={`api-key-${selected.id}`} type={showApiKey ? 'text' : 'password'} value={selected.apiKey}
+                onChange={(event) => updateSelected({ apiKey: event.target.value })}
+                className="form-input" autoComplete="off" spellCheck={false} />
+              <button type="button" className="password-toggle" onClick={() => setShowApiKey(!showApiKey)}
+                aria-label={showApiKey ? '隐藏 API 密钥' : '显示 API 密钥'} aria-pressed={showApiKey}>
+                <Icon name={showApiKey ? 'eye-off' : 'eye'} size={18} />
+              </button>
+            </div>
+            {preset && <a className="provider-docs" href={preset.docsUrl} target="_blank" rel="noreferrer">
+              查看 {selected.name} API 文档<Icon name="external" size={13} />
+            </a>}
+          </div>
           <label className="form-group">
             <span className="form-label">接口地址</span>
             <input type="url" value={selected.endpoint}
@@ -304,6 +331,7 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
             <datalist id={`models-${selected.id}`}>
               {models.map((model) => <option key={model} value={model} />)}
             </datalist>
+            <small className="field-hint">如不确定模型名称，可点击“获取模型”查看可用模型列表</small>
           </label>
 
           {selected.protocol === 'openai-compatible' && isQwenMtModel(selected.model) && (
@@ -311,12 +339,12 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
           )}
 
           <div className="connection-actions">
-            <button className="test-btn" disabled={testing || fetchingModels} onClick={() => void testConnection()}>
-              {testing ? '测试中...' : '测试连接'}
+            <button className="test-btn connection-test" disabled={testing || fetchingModels} onClick={() => void testConnection()}>
+              <Icon name="link" size={18} />{testing ? '测试中...' : '测试连接'}
             </button>
             <button className="test-btn" disabled={testing || fetchingModels || selected.protocol === 'anthropic'}
               onClick={() => void fetchModels()}>
-              {fetchingModels ? '获取中...' : '获取模型'}
+              <Icon name="box" size={18} />{fetchingModels ? '获取中...' : '获取模型'}
             </button>
           </div>
           {message && <div className="inline-message" role="status">{message}</div>}

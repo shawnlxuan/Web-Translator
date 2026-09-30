@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 interface LanguageSelectorProps {
   label: string;
@@ -13,16 +13,17 @@ const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   languages,
   onChange,
 }) => {
+  const id = useId();
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <label className="form-label" style={{ marginBottom: 0, width: '48px', whiteSpace: 'nowrap' }}>
+    <div className="language-control">
+      <label className="control-label" htmlFor={id}>
         {label}
       </label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="form-select"
-        style={{ flex: 1 }}
       >
         {languages.map((lang) => (
           <option key={lang.code} value={lang.code}>
