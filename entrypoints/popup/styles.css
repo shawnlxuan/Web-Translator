@@ -40,6 +40,10 @@ button:focus-visible {
 .app-container,
 .popup-loading {
   width: 360px;
+  /* Keep Edge's auto-sized window and its content on whole device pixels at
+     100%, 125%, 150%, 175% and 200% display scaling. Otherwise a dark row can
+     remain below the rendered content after the popup resizes. */
+  block-size: calc-size(auto, round(up, size, 4px));
 }
 
 .app-container {
