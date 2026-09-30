@@ -1,3 +1,5 @@
+import { TranslationOutputLimitError } from './provider-interface';
+
 /** Validate a completed response from an OpenAI-compatible endpoint. */
 export function extractOpenAIContent(body: unknown): string {
   if (typeof body !== 'object' || body === null) {
@@ -13,6 +15,9 @@ export function extractOpenAIContent(body: unknown): string {
   };
   if (record.error) {
     throw new Error(`OpenAI-compatible 接口返回错误：${formatJsonError(record.error)}`);
+  }
+  if (record.choices?.[0]?.finish_reason === 'length') {
+    throw new TranslationOutputLimitError('length');
   }
   if (record.choices?.[0]?.finish_reason && record.choices[0].finish_reason !== 'stop') {
     throw new Error(`译文未完整生成（${record.choices[0].finish_reason}）。`);

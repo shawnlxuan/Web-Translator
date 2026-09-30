@@ -15,10 +15,12 @@ describe('page translation messages', () => {
       profile.id === 'builtin:qwen' ? { ...profile, model: 'qwen-mt-flash' } : profile
     ));
     expect(createExecuteTranslationMessage('mt-page', settings).translateByParagraph).toBe(true);
-    settings.providerProfiles = settings.providerProfiles.map((profile) => (
-      profile.id === 'builtin:qwen' ? { ...profile, model: 'qwen-plus' } : profile
-    ));
-    expect(createExecuteTranslationMessage('chat-page', settings).translateByParagraph).toBeUndefined();
+    for (const model of ['qwen-plus', 'qwen3.5-plus', 'deepseek-flash', 'gpt-4o']) {
+      settings.providerProfiles = settings.providerProfiles.map((profile) => (
+        profile.id === 'builtin:qwen' ? { ...profile, model } : profile
+      ));
+      expect(createExecuteTranslationMessage('chat-page', settings).translateByParagraph).toBeUndefined();
+    }
   });
 
   it('copies fixed run settings into EXECUTE_TRANSLATION', () => {

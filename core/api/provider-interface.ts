@@ -46,6 +46,16 @@ export interface StreamDelta {
   done: boolean;
 }
 
+/** Output ended at the token limit. Incomplete text must never be displayed or cached. */
+export class TranslationOutputLimitError extends Error {
+  constructor(public reason: 'length' | 'max_tokens', maxOutputTokens?: number) {
+    super(maxOutputTokens === undefined
+      ? `译文达到模型输出长度上限（${reason}），未完整生成。`
+      : `自动分批和扩容重试后，译文仍被截断（${reason}，${maxOutputTokens} token），已保留网页原文。`);
+    this.name = 'TranslationOutputLimitError';
+  }
+}
+
 /** Error from an LLM provider */
 export class ProviderError extends Error {
   /** The individual HTTP request has already exhausted its retry policy. */

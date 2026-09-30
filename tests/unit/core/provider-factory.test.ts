@@ -44,7 +44,7 @@ describe('createProvider', () => {
     },
   );
 
-  it.each(['qwen-plus', 'qwen-mt-uni', 'custom-qwen-mt-flash', 'qwen-mt-flashlight'])(
+  it.each(['qwen-plus', 'qwen3.5-plus', 'deepseek-flash', 'qwen-mt-uni', 'custom-qwen-mt-flash', 'qwen-mt-flashlight'])(
     'does not apply the text-only MT schema to %s', (model) => {
       expect(createProvider(createProfile({ model }))).toBeInstanceOf(OpenAIProvider);
     },

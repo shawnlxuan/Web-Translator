@@ -3,9 +3,11 @@
 // ============================================================
 
 import type { LLMProvider, TranslationRequest, TranslationResponse, StreamDelta } from './provider-interface';
+import { TranslationOutputLimitError } from './provider-interface';
 import { parseAnthropicSSEStream } from './sse-parser';
 import { buildBatchPrompt } from './prompt-templates';
-import { parseNumberedTranslationOutput } from './translation-output-parser';
+import { translateLlmBatch } from './llm-batch-translation';
+import { getLlmTranslationPolicy } from './llm-translation-policy';
 import {
   createProviderErrorFromResponse,
   fetchProviderResponse,
@@ -46,6 +48,18 @@ export class AnthropicProvider implements LLMProvider {
   async *translateBatchStream(
     request: TranslationRequest,
   ): AsyncIterable<StreamDelta> {
+    const policy = getLlmTranslationPolicy(request.model, this.baseUrl);
+    yield* translateLlmBatch(
+      request,
+      (chunk, maxOutputTokens) => this.completeTranslation(chunk, maxOutputTokens),
+      policy,
+    );
+  }
+
+  private async completeTranslation(
+    request: TranslationRequest,
+    maxOutputTokens: number,
+  ): Promise<string> {
     const firstContext = request.sentences[0]?.context;
     const pageContext = {
       pageTitle: firstContext?.pageTitle || '',
@@ -77,7 +91,7 @@ export class AnthropicProvider implements LLMProvider {
         model: request.model,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
-        max_tokens: 4096,
+        max_tokens: maxOutputTokens,
         temperature: 0.1,
         stream: true,
       }),
@@ -98,8 +112,11 @@ export class AnthropicProvider implements LLMProvider {
     let fullContent = '';
 
     for await (const chunk of parseAnthropicSSEStream(response.body)) {
+      if (chunk.stopReason === 'max_tokens') {
+        throw new TranslationOutputLimitError('max_tokens');
+      }
       if (chunk.stopReason && !['end_turn', 'stop_sequence'].includes(chunk.stopReason)) {
-        throw new Error(`译文未完整生成（${chunk.stopReason}），请缩小每批句子数后重试。`);
+        throw new Error(`译文未完整生成（${chunk.stopReason}），已保留网页原文。`);
       }
       if (chunk.content) {
         fullContent += chunk.content;
@@ -110,13 +127,7 @@ export class AnthropicProvider implements LLMProvider {
       }
     }
 
-    const parsed = parseNumberedTranslationOutput(
-      fullContent,
-      request.sentences.length,
-    );
-    for (const { index, text } of parsed.translations) {
-      yield { index, delta: text, done: true };
-    }
+    return fullContent;
   }
 
   async testConnection(model: string): Promise<void> {

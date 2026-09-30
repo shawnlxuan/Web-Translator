@@ -4,10 +4,12 @@
 // ============================================================
 
 import type { LLMProvider, TranslationRequest, TranslationResponse, StreamDelta } from './provider-interface';
+import { TranslationOutputLimitError } from './provider-interface';
 import { parseOpenAISSEStream } from './sse-parser';
 import { buildBatchPrompt } from './prompt-templates';
-import { parseNumberedTranslationOutput } from './translation-output-parser';
 import { extractOpenAIContent } from './openai-response';
+import { translateLlmBatch } from './llm-batch-translation';
+import { getLlmTranslationPolicy } from './llm-translation-policy';
 import {
   createProviderErrorFromResponse,
   fetchProviderResponse,
@@ -48,6 +50,18 @@ export class OpenAIProvider implements LLMProvider {
   async *translateBatchStream(
     request: TranslationRequest,
   ): AsyncIterable<StreamDelta> {
+    const policy = getLlmTranslationPolicy(request.model, this.baseUrl);
+    yield* translateLlmBatch(
+      request,
+      (chunk, maxOutputTokens) => this.completeTranslation(chunk, maxOutputTokens),
+      policy,
+    );
+  }
+
+  private async completeTranslation(
+    request: TranslationRequest,
+    maxOutputTokens: number,
+  ): Promise<string> {
     const { systemPrompt, userMessage } = buildOpenAIBatchPrompt(request);
     const response = await fetchProviderResponse(this.baseUrl, 'chat/completions', 'openai-compatible', {
       method: 'POST',
@@ -63,7 +77,7 @@ export class OpenAIProvider implements LLMProvider {
           { role: 'user', content: userMessage },
         ],
         temperature: 0.1,
-        max_tokens: 4096,
+        max_tokens: maxOutputTokens,
         stream: true,
       }),
     }, {
@@ -87,20 +101,17 @@ export class OpenAIProvider implements LLMProvider {
         if (chunk.content) {
           fullContent += chunk.content;
         }
+        if (chunk.finishReason === 'length') {
+          throw new TranslationOutputLimitError('length');
+        }
         if (chunk.finishReason && chunk.finishReason !== 'stop') {
-          throw new Error(`译文未完整生成（${chunk.finishReason}），请缩小每批句子数后重试。`);
+          throw new Error(`译文未完整生成（${chunk.finishReason}），已保留网页原文。`);
         }
         if (chunk.finishReason === 'stop') break;
       }
     }
 
-    const parsed = parseNumberedTranslationOutput(
-      fullContent,
-      request.sentences.length,
-    );
-    for (const { index, text } of parsed.translations) {
-      yield { index, delta: text, done: true };
-    }
+    return fullContent;
   }
 
   async testConnection(model: string): Promise<void> {
