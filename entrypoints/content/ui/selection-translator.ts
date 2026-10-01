@@ -100,6 +100,7 @@ class SelectionTranslator {
   private readonly shadow: ShadowRoot;
   private readonly action: HTMLButtonElement;
   private readonly panel: HTMLElement;
+  private readonly dragHandle: HTMLElement;
   private readonly panelTitle: HTMLElement;
   private readonly status: HTMLElement;
   private readonly result: HTMLElement;
@@ -111,12 +112,21 @@ class SelectionTranslator {
   private settingsLink: HTMLAnchorElement;
   private settings: Settings = DEFAULT_SETTINGS;
   private snapshot: SelectionSnapshot | null = null;
+  private panelSnapshot: SelectionSnapshot | null = null;
   private pointerSelecting = false;
   private selectionTimer: number | null = null;
   private requestId = 0;
   private panelOpen = false;
   private translationText = '';
   private lastContextPoint: { x: number; y: number } | null = null;
+  private panelPosition: OverlayPosition | null = null;
+  private dragStart: {
+    pointerId: number;
+    pointerX: number;
+    pointerY: number;
+    left: number;
+    top: number;
+  } | null = null;
 
   constructor() {
     this.host = document.createElement('div');
@@ -130,6 +140,7 @@ class SelectionTranslator {
     this.shadow.innerHTML = createShadowMarkup();
     this.action = this.requiredElement<HTMLButtonElement>('[data-action]');
     this.panel = this.requiredElement<HTMLElement>('[data-panel]');
+    this.dragHandle = this.requiredElement<HTMLElement>('[data-drag-handle]');
     this.panelTitle = this.requiredElement<HTMLElement>('[data-title]');
     this.status = this.requiredElement<HTMLElement>('[data-status]');
     this.result = this.requiredElement<HTMLElement>('[data-result]');
@@ -158,6 +169,11 @@ class SelectionTranslator {
     this.retryButton.addEventListener('click', () => {
       if (this.snapshot) void this.translate(this.snapshot);
     });
+    this.dragHandle.addEventListener('pointerdown', this.handleDragStart);
+    this.dragHandle.addEventListener('pointermove', this.handleDragMove);
+    this.dragHandle.addEventListener('pointerup', this.handleDragEnd);
+    this.dragHandle.addEventListener('pointercancel', this.handleDragEnd);
+    this.dragHandle.addEventListener('lostpointercapture', this.handleDragEnd);
 
     document.addEventListener('pointerdown', this.handlePointerDown, true);
     document.addEventListener('pointerup', this.handlePointerUp, true);
@@ -236,6 +252,55 @@ class SelectionTranslator {
     if (event.composedPath().includes(this.host)) return;
     this.dismiss();
   };
+
+  private readonly handleDragStart = (event: PointerEvent): void => {
+    if (!this.panelOpen || this.dragStart || event.button !== 0 || !event.isPrimary) return;
+    if (event.target instanceof Element && event.target.closest('button, a')) return;
+    event.preventDefault();
+    const rect = this.panel.getBoundingClientRect();
+    this.dragStart = {
+      pointerId: event.pointerId,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      left: rect.left,
+      top: rect.top,
+    };
+    this.panelPosition = { left: rect.left, top: rect.top };
+    this.panel.setAttribute('data-dragging', '');
+    this.dragHandle.setPointerCapture(event.pointerId);
+  };
+
+  private readonly handleDragMove = (event: PointerEvent): void => {
+    if (!this.dragStart || event.pointerId !== this.dragStart.pointerId) return;
+    event.preventDefault();
+    this.setPanelPosition({
+      left: this.dragStart.left + event.clientX - this.dragStart.pointerX,
+      top: this.dragStart.top + event.clientY - this.dragStart.pointerY,
+    });
+  };
+
+  private readonly handleDragEnd = (event: PointerEvent): void => {
+    if (event.pointerId === this.dragStart?.pointerId) this.stopDragging();
+  };
+
+  private stopDragging(): void {
+    const pointerId = this.dragStart?.pointerId;
+    this.dragStart = null;
+    this.panel.removeAttribute('data-dragging');
+    if (pointerId !== undefined && this.dragHandle.hasPointerCapture(pointerId)) {
+      this.dragHandle.releasePointerCapture(pointerId);
+    }
+  }
+
+  private setPanelPosition(position: OverlayPosition): void {
+    const rect = this.panel.getBoundingClientRect();
+    this.panelPosition = {
+      left: clamp(position.left, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.width - VIEWPORT_MARGIN)),
+      top: clamp(position.top, VIEWPORT_MARGIN, Math.max(VIEWPORT_MARGIN, window.innerHeight - rect.height - VIEWPORT_MARGIN)),
+    };
+    this.panel.style.left = `${this.panelPosition.left}px`;
+    this.panel.style.top = `${this.panelPosition.top}px`;
+  }
 
   private applySettings(settings: Settings): void {
     this.settings = settings;
@@ -349,14 +414,19 @@ class SelectionTranslator {
   }
 
   private async translate(snapshot: SelectionSnapshot): Promise<void> {
+    if (!this.panelOpen || this.panelSnapshot !== snapshot) {
+      this.stopDragging();
+      this.panelPosition = null;
+    }
     this.snapshot = snapshot;
+    this.panelSnapshot = snapshot;
     this.action.hidden = true;
     this.panel.hidden = false;
     this.panelOpen = true;
     this.updatePanelTitle();
     this.renderLoading();
-    this.positionPanel(snapshot.anchor);
     const currentRequestId = ++this.requestId;
+    this.positionPanel(snapshot.anchor);
 
     if (countSelectionCodePoints(snapshot.text) > MANUAL_TRANSLATION_MAX_LENGTH) {
       this.renderError(
@@ -452,7 +522,12 @@ class SelectionTranslator {
   }
 
   private positionPanel(anchor: SelectionAnchorRect): void {
-    window.requestAnimationFrame(() => this.positionElement(this.panel, anchor));
+    const currentRequestId = this.requestId;
+    window.requestAnimationFrame(() => {
+      if (!this.panelOpen || currentRequestId !== this.requestId) return;
+      if (this.panelPosition) this.setPanelPosition(this.panelPosition);
+      else this.positionElement(this.panel, anchor);
+    });
   }
 
   private positionElement(
@@ -472,6 +547,9 @@ class SelectionTranslator {
   }
 
   private dismiss(): void {
+    this.stopDragging();
+    this.panelPosition = null;
+    this.panelSnapshot = null;
     this.requestId++;
     this.panelOpen = false;
     this.action.hidden = true;
@@ -625,7 +703,11 @@ function createShadowMarkup(): string {
         padding: 16px;
         border-bottom: 1px solid #e7e3f5;
         background: linear-gradient(120deg, #fff, #fbfaff);
+        cursor: grab;
+        user-select: none;
+        touch-action: none;
       }
+      [data-dragging] .header { cursor: grabbing; }
       .panel-logo { width: 34px; height: 34px; flex-shrink: 0; }
       .panel-heading { min-width: 0; flex: 1; }
       [data-title] { display: block; font-size: 16px; font-weight: 700; line-height: 1.4; }
@@ -761,8 +843,8 @@ function createShadowMarkup(): string {
       <img data-icon alt="" />
     </button>
     <section data-panel role="dialog" aria-label="划词翻译结果" hidden>
-      <div class="header">
-        <img class="panel-logo" data-icon alt="" />
+      <div class="header" data-drag-handle title="拖动标题栏移动弹窗">
+        <img class="panel-logo" data-icon alt="" draggable="false" />
         <div class="panel-heading">
           <span data-title>划词翻译</span>
           <p class="panel-subtitle">由 AI 提供翻译结果</p>
