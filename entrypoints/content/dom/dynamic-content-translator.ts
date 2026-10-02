@@ -28,7 +28,6 @@ export interface DynamicContentTranslationState {
   targetLang: string;
   batchSize: number;
   contextWindowSize: number;
-  translateByParagraph?: boolean;
   existingNodes: ExtractedTextNode[];
 }
 
@@ -104,9 +103,7 @@ export function prepareDynamicContentTranslation(
   if (extractedNodes.length === 0) return null;
 
   const segments = deps.filterSegmentsForTargetLanguage(
-    state.translateByParagraph
-      ? deps.buildSegments(extractedNodes, state.sourceLang, true)
-      : deps.buildSegments(extractedNodes, state.sourceLang),
+    deps.buildSegments(extractedNodes, state.sourceLang),
     state.targetLang,
   );
   if (segments.length === 0) return null;

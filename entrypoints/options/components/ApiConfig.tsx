@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProviderId, ProviderProfile, Settings } from '../../../shared/types';
-import { isQwenMtModel } from '../../../shared/provider-models';
 import Icon from '../../../shared/components/Icon';
 import ProviderIcon from './ProviderIcon';
 import { SaveButton, SectionHeading } from './SectionHeading';
@@ -333,10 +332,6 @@ const ApiConfig: React.FC<ApiConfigProps> = ({ settings, onSave }) => {
             </datalist>
             <small className="field-hint">如不确定模型名称，可点击“获取模型”查看可用模型列表</small>
           </label>
-
-          {selected.protocol === 'openai-compatible' && isQwenMtModel(selected.model) && (
-            <p className="form-hint">Qwen-MT 请求自动排队，每次至少间隔 1.2 秒；遇到限流会等待后重试。不应用自定义提示词或上下文设置。</p>
-          )}
 
           <div className="connection-actions">
             <button className="test-btn connection-test" disabled={testing || fetchingModels} onClick={() => void testConnection()}>

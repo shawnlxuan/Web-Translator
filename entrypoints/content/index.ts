@@ -63,7 +63,6 @@ let currentBatchSize = 10;
 let currentDispatchConcurrency = 5;
 let currentContextWindowSize = 3;
 let currentEnableMutationObserver = true;
-let currentTranslateByParagraph = false;
 let errorMessage: string | null = null;
 let translationRunId = 0;
 const dynamicContentQueue = new DynamicContentQueue<Node>();
@@ -142,7 +141,6 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
   currentDispatchConcurrency = clampNumber(msg.maxConcurrentCalls, 1, 10);
   currentContextWindowSize = msg.contextWindowSize;
   currentEnableMutationObserver = msg.enableMutationObserver;
-  currentTranslateByParagraph = msg.translateByParagraph === true;
   errorMessage = null;
   pageState = TranslationState.EXTRACTING;
   isTranslating = true;
@@ -167,7 +165,6 @@ async function startTranslation(msg: ExecuteTranslationMessage) {
       msg.sourceLang,
       currentBatchSize,
       currentContextWindowSize,
-      currentTranslateByParagraph,
     );
     extractedNodes = result.extractedNodes;
     segments = result.segments;
@@ -399,7 +396,6 @@ function translateNewContent(newNodes: Node[], runId: number): boolean {
     targetLang: currentTargetLang,
     batchSize: currentBatchSize,
     contextWindowSize: currentContextWindowSize,
-    translateByParagraph: currentTranslateByParagraph,
     existingNodes: extractedNodes,
   });
 

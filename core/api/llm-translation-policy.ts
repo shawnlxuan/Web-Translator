@@ -10,7 +10,6 @@ const DEEPSEEK_MODELS = new Set([
   'deepseek-v4-pro',
 ]);
 
-/** Chat-model options are independent of the native Qwen-MT adapter and its quotas. */
 export function getLlmTranslationPolicy(model: string, endpoint: string): LlmTranslationPolicy {
   // Match the documented 64K default output allowance without overriding the
   // model's thinking mode. DeepSeek accepts up to 384K output tokens; unrelated

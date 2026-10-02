@@ -99,8 +99,8 @@ export class CachedTranslationService {
           return provider.translateBatch(providerRequest);
         }
 
-        // The MT adapter yields a completed sentence after each HTTP response,
-        // even though the underlying HTTP request uses non-streaming JSON.
+        // Providers may complete sentences out of order. Publish only validated
+        // completions so partial or retried streams never reach the page/cache.
         const translations = new Map<number, string>();
         for await (const delta of provider.translateBatchStream(providerRequest)) {
           signal?.throwIfAborted();

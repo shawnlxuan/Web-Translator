@@ -26,7 +26,6 @@ export function runExtractionPipeline(
   sourceLang?: string,
   batchSize: number = 10,
   contextWindowSize: number = 3,
-  translateByParagraph: boolean = false,
 ): TranslationPipelineResult {
   resetContextCache();
 
@@ -42,7 +41,7 @@ export function runExtractionPipeline(
 
   // Step 3: Build segments
   const segments = filterSegmentsForTargetLanguage(
-    buildSegments(extractedNodes, detectedLang, translateByParagraph),
+    buildSegments(extractedNodes, detectedLang),
     targetLang,
   );
 

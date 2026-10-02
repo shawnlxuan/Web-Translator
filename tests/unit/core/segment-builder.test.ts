@@ -5,20 +5,19 @@ import { TextType } from '../../../shared/types';
 import { decodeInlineText } from '../../../core/translation/inline-markup';
 
 describe('buildSegments', () => {
-  it('translates a plain multi-sentence paragraph in one native-MT unit', () => {
+  it('splits a plain paragraph into sentences', () => {
     const blockElement = { tagName: 'P' } as Element;
     const text = 'The first sentence. The second sentence. The third sentence.';
     const nodes = [createExtractedNode(text, blockElement)];
     expect(buildSegments(nodes, 'en')[0].sentences).toHaveLength(3);
-    expect(buildSegments(nodes, 'en', true)[0].sentences).toEqual([text]);
   });
 
-  it('keeps long paragraphs split and retains inline-node boundaries in paragraph mode', () => {
+  it('splits long plain paragraphs and retains inline-node boundaries', () => {
     const blockElement = { tagName: 'P' } as Element;
     const longText = 'A long sentence about translation. '.repeat(80);
-    expect(buildSegments([createExtractedNode(longText, blockElement)], 'en', true)[0].sentences.length).toBeGreaterThan(1);
+    expect(buildSegments([createExtractedNode(longText, blockElement)], 'en')[0].sentences.length).toBeGreaterThan(1);
     const nodes = [createExtractedNode('Read ', blockElement), createExtractedNode('the documentation.', blockElement)];
-    const segment = buildSegments(nodes, 'en', true)[0];
+    const segment = buildSegments(nodes, 'en')[0];
     expect(segment.sentences).toHaveLength(1);
     expect(decodeInlineText(segment.sentences[0], 2)).toEqual(['Read ', 'the documentation.']);
   });

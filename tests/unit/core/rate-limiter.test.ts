@@ -16,6 +16,38 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('RateLimiter', () => {
+  it('starts paced requests in FIFO order even when earlier responses finish immediately', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const limiter = new RateLimiter({ maxConcurrent: 3, minIntervalMs: 1100 });
+    const starts: Array<[number, number]> = [];
+    const run = (index: number) => limiter.execute(async () => { starts.push([index, Date.now()]); });
+    const initial = [run(0), run(1), run(2)];
+    await vi.advanceTimersByTimeAsync(0);
+    const next = [run(3), run(4), run(5)];
+    await vi.advanceTimersByTimeAsync(5500);
+    await Promise.all([...initial, ...next]);
+    expect(starts).toEqual([[0, 0], [1, 1100], [2, 2200], [3, 3300], [4, 4400], [5, 5500]]);
+  });
+
+  it('removes a cancelled paced start before a long reservation expires', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const limiter = new RateLimiter({ maxConcurrent: 3, minIntervalMs: 30_000 });
+    await limiter.execute(async () => {});
+    const next = limiter.execute(async () => 'next');
+    const controller = new AbortController();
+    const cancelledOperation = vi.fn(async () => 'cancelled');
+    const cancelled = limiter.execute(cancelledOperation, controller.signal);
+    const rejection = expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await rejection;
+    expect(cancelledOperation).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(next).resolves.toBe('next');
+  });
+
   it('removes cancelled queued requests without consuming a permit', async () => {
     const limiter = new RateLimiter({ maxConcurrent: 1 }); const gate = deferred(); const controller = new AbortController();
     const first = limiter.execute(() => gate.promise); const operation = vi.fn(async () => 'cancelled');

@@ -8,21 +8,6 @@ import {
 import { getDefaultSettings } from '../../../core/storage/defaults';
 
 describe('page translation messages', () => {
-  it('selects paragraph units only for native Qwen-MT profiles', () => {
-    const settings = getDefaultSettings();
-    settings.activeProviderId = 'builtin:qwen';
-    settings.providerProfiles = settings.providerProfiles.map((profile) => (
-      profile.id === 'builtin:qwen' ? { ...profile, model: 'qwen-mt-flash' } : profile
-    ));
-    expect(createExecuteTranslationMessage('mt-page', settings).translateByParagraph).toBe(true);
-    for (const model of ['qwen-plus', 'qwen3.5-plus', 'deepseek-flash', 'gpt-4o']) {
-      settings.providerProfiles = settings.providerProfiles.map((profile) => (
-        profile.id === 'builtin:qwen' ? { ...profile, model } : profile
-      ));
-      expect(createExecuteTranslationMessage('chat-page', settings).translateByParagraph).toBeUndefined();
-    }
-  });
-
   it('copies fixed run settings into EXECUTE_TRANSLATION', () => {
     const settings = {
       ...getDefaultSettings(),

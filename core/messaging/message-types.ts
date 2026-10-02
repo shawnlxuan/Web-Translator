@@ -88,8 +88,6 @@ export interface ExecuteTranslationMessage {
   contextWindowSize: number;
   translationColor: string;
   enableMutationObserver: boolean;
-  /** Native MT can translate a plain paragraph in one request. */
-  translateByParagraph?: boolean;
 }
 
 export interface InjectTranslationsMessage {

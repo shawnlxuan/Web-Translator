@@ -100,15 +100,15 @@ describe('provider HTTP client', () => {
   it('preserves Retry-After seconds and HTTP dates for the request scheduler', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-30T04:00:00Z'));
-    const seconds = await createProviderErrorFromResponse('Qwen-MT', new Response('limited', {
+    const seconds = await createProviderErrorFromResponse('My API', new Response('limited', {
       status: 429, headers: { 'retry-after': '12' },
     }));
     expect(seconds.retryAfterMs).toBe(12_000);
-    const date = await createProviderErrorFromResponse('Qwen-MT', new Response('limited', {
+    const date = await createProviderErrorFromResponse('My API', new Response('limited', {
       status: 429, headers: { 'retry-after': 'Wed, 30 Sep 2026 04:01:00 GMT' },
     }));
     expect(date.retryAfterMs).toBe(60_000);
-    const invalid = await createProviderErrorFromResponse('Qwen-MT', new Response('limited', {
+    const invalid = await createProviderErrorFromResponse('My API', new Response('limited', {
       status: 429, headers: { 'retry-after': '-10' },
     }));
     expect(invalid.retryAfterMs).toBeUndefined();

@@ -19,8 +19,8 @@ export async function* translateLlmBatch(
   policy: LlmTranslationPolicy,
 ): AsyncIterable<StreamDelta> {
   request.signal?.throwIfAborted();
-  // Each physical request owns its retries. There is no MT pacing or shared
-  // cooldown here; the caller's semaphore still controls batch concurrency.
+  // Each physical request owns its retries; the caller's semaphore controls
+  // batch concurrency.
   const requestLimiter = new RateLimiter();
 
   async function* translateChunk(

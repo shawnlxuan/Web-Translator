@@ -5,8 +5,6 @@
 import type { LLMProvider } from './provider-interface';
 import { OpenAIProvider } from './openai-provider';
 import { AnthropicProvider } from './anthropic-provider';
-import { QwenMtProvider } from './qwen-mt-provider';
-import { isQwenMtModel } from '../../shared/provider-models';
 import type { ProviderProfile } from '../../shared/types';
 import { validateProviderEndpoint } from '../../shared/provider-presets';
 
@@ -42,9 +40,7 @@ export function createProvider(profile: ProviderProfile): LLMProvider {
     case 'anthropic':
       return new AnthropicProvider(apiKey, validatedEndpoint);
     case 'openai-compatible':
-      return isQwenMtModel(model)
-        ? new QwenMtProvider(apiKey, validatedEndpoint)
-        : new OpenAIProvider(apiKey, validatedEndpoint);
+      return new OpenAIProvider(apiKey, validatedEndpoint);
     default:
       throw new Error(`Unsupported provider protocol: ${String(profile.protocol)}`);
   }

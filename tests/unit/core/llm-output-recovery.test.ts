@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OpenAIProvider } from '../../../core/api/openai-provider';
 import { AnthropicProvider } from '../../../core/api/anthropic-provider';
-import { QwenMtProvider } from '../../../core/api/qwen-mt-provider';
 import { RateLimiter } from '../../../core/api/rate-limiter';
 import type { TranslationRequest } from '../../../core/api/provider-interface';
 import { CachedTranslationService } from '../../../core/translation/translation-service';
@@ -317,17 +316,17 @@ describe('ordinary LLM output recovery', () => {
     expect(cacheSet).not.toHaveBeenCalled();
   });
 
-  it('keeps normal chat requests parallel and unpaced while Qwen-MT is in a cooldown', async () => {
+  it('runs independent chat requests while another request is backing off', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const endpoint = 'https://maas.qianwenaiapi.com/compatible-mode/v1';
+    const endpoint = 'https://example.com/v1';
     const controller = new AbortController();
-    const mtFetch: typeof fetch = vi.fn(async () => new Response('limited', {
+    const limitedFetch: typeof fetch = vi.fn(async () => new Response('limited', {
       status: 429, headers: { 'retry-after': '30' },
     }));
-    const mtRun = new QwenMtProvider('llm-isolation', endpoint, mtFetch)
-      .translateBatch({ ...input(['Source'], 'qwen-mt-flash'), signal: controller.signal }).catch((error) => error);
+    const limitedRun = new OpenAIProvider('llm-isolation', endpoint, limitedFetch)
+      .translateBatch({ ...input(['Source']), signal: controller.signal }).catch((error) => error);
     await vi.advanceTimersByTimeAsync(0);
 
     const starts: number[] = [];
@@ -344,8 +343,8 @@ describe('ordinary LLM output recovery', () => {
       provider.translateBatch(input(texts, 'qwen-plus'))]);
     expect(starts).toEqual([0, 0]);
     expect(results.map(({ translations }) => translations.length)).toEqual([20, 20]);
-    expect(mtFetch).toHaveBeenCalledOnce();
+    expect(limitedFetch).toHaveBeenCalledOnce();
     controller.abort();
-    expect(await mtRun).toMatchObject({ name: 'AbortError' });
+    expect(await limitedRun).toMatchObject({ name: 'AbortError' });
   });
 });

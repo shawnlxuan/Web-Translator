@@ -50,8 +50,8 @@ describe('runExtractionPipeline context lifecycle', () => {
     });
   });
 
-  it('passes native-MT paragraph mode into segment construction', () => {
-    runExtractionPipeline('zh-CN', 'en', 8, 2, true);
-    expect(mocks.buildSegments).toHaveBeenCalledWith([], 'en', true);
+  it('passes the source language into segment construction', () => {
+    runExtractionPipeline('zh-CN', 'en', 8, 2);
+    expect(mocks.buildSegments).toHaveBeenCalledWith([], 'en');
   });
 });

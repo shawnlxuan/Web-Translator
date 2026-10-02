@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AnthropicProvider } from '../../../core/api/anthropic-provider';
 import { OpenAIProvider } from '../../../core/api/openai-provider';
-import { QwenMtProvider } from '../../../core/api/qwen-mt-provider';
 import { createProvider } from '../../../core/api/provider-factory';
 import type { ProviderProfile } from '../../../shared/types';
 
@@ -38,14 +37,8 @@ describe('createProvider', () => {
     expect(provider).toBeInstanceOf(OpenAIProvider);
   });
 
-  it.each(['qwen-mt-flash', 'qwen-mt-lite', 'qwen-mt-plus', 'qwen-mt-turbo', ' qwen-mt-flash-2026-09-01 '])(
-    'routes %s through native translation even for a custom compatible gateway', (model) => {
-      expect(createProvider(createProfile({ model }))).toBeInstanceOf(QwenMtProvider);
-    },
-  );
-
-  it.each(['qwen-plus', 'qwen3.5-plus', 'deepseek-flash', 'qwen-mt-uni', 'custom-qwen-mt-flash', 'qwen-mt-flashlight'])(
-    'does not apply the text-only MT schema to %s', (model) => {
+  it.each(['qwen-mt-flash', 'qwen-mt-lite', 'qwen-mt-plus', 'qwen-mt-turbo', ' qwen-mt-flash-2026-09-01 ', 'qwen-plus', 'qwen3.5-plus', 'deepseek-flash'])(
+    'uses the OpenAI-compatible protocol for %s', (model) => {
       expect(createProvider(createProfile({ model }))).toBeInstanceOf(OpenAIProvider);
     },
   );

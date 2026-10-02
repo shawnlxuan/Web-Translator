@@ -44,6 +44,13 @@ export class RateLimiter {
   private running = 0;
   private nextStartAt = 0;
   private cooldownUntil = 0;
+  private schedulingStart = false;
+  private startQueue: Array<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+    signal?: AbortSignal;
+    onAbort: () => void;
+  }> = [];
   private queue: Array<{
     resolve: () => void;
     reject: (error: unknown) => void;
@@ -144,6 +151,44 @@ export class RateLimiter {
   }
 
   private async waitForStart(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    if (!this.schedulingStart && !this.startQueue.length && !this.config.minIntervalMs
+      && Math.max(this.nextStartAt, this.cooldownUntil) <= Date.now()) {
+      return;
+    }
+    return new Promise((resolve, reject) => {
+      const entry = { resolve, reject, signal, onAbort: () => {
+        this.startQueue = this.startQueue.filter((candidate) => candidate !== entry);
+        reject(signal?.reason);
+      } };
+      this.startQueue.push(entry);
+      signal?.addEventListener('abort', entry.onAbort, { once: true });
+      void this.processStartQueue();
+    });
+  }
+
+  private async processStartQueue(): Promise<void> {
+    if (this.schedulingStart) return;
+    this.schedulingStart = true;
+    try {
+      // One scheduler reserves start times in FIFO order. Independent timers let
+      // a just-completed worker repeatedly jump ahead of older waiting requests.
+      while (this.startQueue.length) {
+        const entry = this.startQueue.shift()!;
+        entry.signal?.removeEventListener('abort', entry.onAbort);
+        try {
+          await this.reserveStart(entry.signal);
+          entry.resolve();
+        } catch (error) {
+          entry.reject(error);
+        }
+      }
+    } finally {
+      this.schedulingStart = false;
+    }
+  }
+
+  private async reserveStart(signal?: AbortSignal): Promise<void> {
     while (true) {
       signal?.throwIfAborted();
       const delay = Math.max(this.nextStartAt, this.cooldownUntil) - Date.now();

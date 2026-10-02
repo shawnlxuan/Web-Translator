@@ -7,9 +7,6 @@ import { generateId } from '../../../shared/utils';
 import { splitSentences } from '../../../core/segmentation/sentence-splitter';
 import { encodeInlineText } from '../../../core/translation/inline-markup';
 
-// Keep combined native-MT inputs small; longer paragraphs retain sentence splitting.
-const MAX_PARAGRAPH_CHARACTERS = 2000;
-
 /**
  * Group extracted text nodes into segments.
  * Text nodes in the same block element are grouped together.
@@ -21,7 +18,6 @@ const MAX_PARAGRAPH_CHARACTERS = 2000;
 export function buildSegments(
   textNodes: ExtractedTextNode[],
   sourceLang: string = 'en',
-  translateByParagraph: boolean = false,
 ): Segment[] {
   if (textNodes.length === 0) return [];
 
@@ -39,13 +35,10 @@ export function buildSegments(
     const combinedText = sourceTexts.join('').trim();
     if (combinedText.trim().length === 0) continue;
 
-    // Inline boundaries stay intact. Native MT handles ordinary paragraphs in
-    // one call instead of consuming a rate-limit slot for every sentence.
+    // Keep inline-node boundaries intact when translating a grouped paragraph.
     const sentences = nodes.length > 1
       ? [encodeInlineText(sourceTexts)]
-      : translateByParagraph && combinedText.length <= MAX_PARAGRAPH_CHARACTERS
-        ? [combinedText]
-        : splitSentences(combinedText, sourceLang);
+      : splitSentences(combinedText, sourceLang);
     if (sentences.length === 0) continue;
 
     const segment: Segment = {
