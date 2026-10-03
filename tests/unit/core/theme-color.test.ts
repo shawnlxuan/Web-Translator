@@ -20,26 +20,4 @@ describe('extension theme colors', () => {
     expect(optionsStyles).toContain('background: var(--tr-brand)');
     expect(`${popupStyles}\n${optionsStyles}`).not.toContain('#167d68');
   });
-
-  it('uses a subtle background while translation text follows the source color', () => {
-    const contentStyles = readFileSync('entrypoints/content/styles.css', 'utf8');
-    const displayManager = readFileSync(
-      'entrypoints/content/display/display-manager.ts',
-      'utf8',
-    );
-
-    expect(contentStyles).toMatch(
-      /\.tr-block-translation\s*\{[^}]*width: 100%;[^}]*background-color: rgba\(124, 58, 237, 0\.06\)/s,
-    );
-    expect(contentStyles).toContain("content: '·'");
-    expect(contentStyles).toContain("content: '↳'");
-    expect(contentStyles).toMatch(
-      /\.tr-compact-translation\s*\{[^}]*background: transparent;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/s,
-    );
-    expect(contentStyles).toMatch(
-      /\.tr-table-translation\s*\{[^}]*background: transparent;[^}]*white-space: normal;/s,
-    );
-    expect(displayManager).toContain("`color: ${style.color || 'inherit'}`");
-    expect(displayManager).not.toContain('applyReplaceColor');
-  });
 });

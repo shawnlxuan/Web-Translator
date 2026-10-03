@@ -17,7 +17,9 @@ type Listener = (message: any, sender: any, respond: (response: any) => void) =>
 describe('background page run lifecycle', () => {
   let listeners: Listener[];
   let command: (name: string) => Promise<void>;
-  let updateTab: (id: number, info: { status?: string; url?: string }) => void;
+  let tabUpdateListeners: Array<(id: number, info: { status?: string; url?: string }) => void>;
+  let commitNavigation: (details: { tabId: number; frameId: number; transitionType?: string }) => void;
+  let removeTab: (id: number) => void;
   let settings: typeof DEFAULT_SETTINGS;
   let state: { pageId: string | null; state: string };
   let session: Record<string, unknown>;
@@ -26,7 +28,7 @@ describe('background page run lifecycle', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    listeners = []; sent = []; session = {};
+    listeners = []; sent = []; session = {}; tabUpdateListeners = [];
     settings = structuredClone(DEFAULT_SETTINGS);
     settings.providerProfiles[0].apiKey = 'local-secret';
     state = { pageId: null, state: 'idle' };
@@ -42,6 +44,9 @@ describe('background page run lifecycle', () => {
       },
       contextMenus: { onClicked: { addListener() {} } },
       commands: { onCommand: { addListener: (listener: typeof command) => { command = listener; } } },
+      webNavigation: {
+        onCommitted: { addListener: (listener: typeof commitNavigation) => { commitNavigation = listener; } },
+      },
       storage: {
         local: { get: async () => ({ ai_translator_settings: settings }) },
         session: {
@@ -52,8 +57,8 @@ describe('background page run lifecycle', () => {
       },
       tabs: {
         query: async () => [{ id: 42 }],
-        onRemoved: { addListener() {} },
-        onUpdated: { addListener: (listener: typeof updateTab) => { updateTab = listener; } },
+        onRemoved: { addListener: (listener: typeof removeTab) => { removeTab = listener; } },
+        onUpdated: { addListener: (listener: (typeof tabUpdateListeners)[number]) => { tabUpdateListeners.push(listener); } },
         sendMessage: async (_tab: number, message: any) => {
           sent.push(message);
           if (message.type === 'GET_TRANSLATION_STATE') return state;
@@ -66,6 +71,10 @@ describe('background page run lifecycle', () => {
   });
 
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  function updateTab(info: { status?: string; url?: string }) {
+    tabUpdateListeners.forEach((listener) => listener(42, info));
+  }
 
   function send(message: any, fromContent = false): Promise<any> {
     const sender = fromContent ? { tab: { id: 42 }, url: 'https://page.test/' }
@@ -92,8 +101,10 @@ describe('background page run lifecycle', () => {
     settings.providerProfiles[0].model = 'new-model';
     settings.providerProfiles[0].endpoint = 'https://different.test/v1';
     settings.providerProfiles[0].apiKey = 'updated-local-secret';
-    vi.resetModules(); listeners = [];
+    vi.resetModules(); listeners = []; tabUpdateListeners = [];
     await import('../../../entrypoints/background/index');
+    updateTab({ status: 'loading', url: 'https://page.test/#section' });
+    commitNavigation({ tabId: 42, frameId: 3 });
     const result = await send(batch(started.pageId), true);
     expect(result?.error).toBeUndefined();
     expect(mocks.provider).toHaveBeenLastCalledWith({
@@ -130,13 +141,64 @@ describe('background page run lifecycle', () => {
     expect(state.pageId).not.toBe(started.pageId);
   });
 
-  it('keeps same-document history changes active and clears the run on navigation', async () => {
+  it.each([
+    { status: 'loading', url: 'https://page.test/#section' },
+    { status: 'loading', url: 'https://page.test/updated-by-history' },
+    { status: 'loading' },
+  ])('keeps the run active on a tab update without a new document: %j', async (info) => {
     await import('../../../entrypoints/background/index');
     const started = await send({ type: 'START_TRANSLATION' });
-    updateTab(42, { url: 'https://page.test/#section' });
-    await send(batch(started.pageId), true);
-    expect(sent.at(-1)?.type).toBe('INJECT_TRANSLATIONS');
-    updateTab(42, { status: 'loading' });
+    updateTab(info);
+    updateTab({ status: 'complete' });
+    expect((await send(batch(started.pageId), true))?.error).toBeUndefined();
+    expect(sent.at(-1)).toMatchObject({ type: 'INJECT_TRANSLATIONS', pageId: started.pageId });
+    expect(session.tr_page_run_42).toMatchObject({ pageId: started.pageId });
+  });
+
+  it('keeps the run active when an iframe or another tab navigates', async () => {
+    await import('../../../entrypoints/background/index');
+    const started = await send({ type: 'START_TRANSLATION' });
+    commitNavigation({ tabId: 42, frameId: 3 });
+    commitNavigation({ tabId: 43, frameId: 0 });
+    expect((await send(batch(started.pageId), true))?.error).toBeUndefined();
+    expect(sent.at(-1)).toMatchObject({ type: 'INJECT_TRANSLATIONS', pageId: started.pageId });
+    expect(session.tr_page_run_42).toMatchObject({ pageId: started.pageId });
+  });
+
+  it.each(['link', 'reload'])('aborts and removes the run when the main document commits a %s navigation', async (transitionType) => {
+    await import('../../../entrypoints/background/index');
+    const started = await send({ type: 'START_TRANSLATION' });
+    let requestSignal: AbortSignal | undefined;
+    mocks.translate.mockImplementation((request: TranslationRequest) => {
+      requestSignal = request.signal;
+      return new Promise((_resolve, reject) => request.signal?.addEventListener('abort', () => reject(request.signal?.reason)));
+    });
+    const translating = send(batch(started.pageId), true);
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    commitNavigation({ tabId: 42, frameId: 0, transitionType });
+    await translating;
+    expect(requestSignal?.aborted).toBe(true);
+    expect(sent.some((message) => message.type === 'INJECT_TRANSLATIONS')).toBe(false);
+    expect(mocks.cacheSet).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(session).toEqual({}));
+    expect((await send(batch(started.pageId), true)).error).toMatch(/expired/);
+  });
+
+  it('removes the persisted run on navigation after worker eviction', async () => {
+    await import('../../../entrypoints/background/index');
+    const started = await send({ type: 'START_TRANSLATION' });
+    vi.resetModules(); listeners = []; tabUpdateListeners = [];
+    await import('../../../entrypoints/background/index');
+    commitNavigation({ tabId: 42, frameId: 0 });
+    await vi.waitFor(() => expect(session).toEqual({}));
+    expect((await send(batch(started.pageId), true)).error).toMatch(/expired/);
+    expect(mocks.translate).not.toHaveBeenCalled();
+  });
+
+  it('removes the run when its tab is closed', async () => {
+    await import('../../../entrypoints/background/index');
+    const started = await send({ type: 'START_TRANSLATION' });
+    removeTab(42);
     await vi.waitFor(() => expect(session).toEqual({}));
     expect((await send(batch(started.pageId), true)).error).toMatch(/expired/);
   });

@@ -70,9 +70,10 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   invalidateTab(tabId);
   void pageRunStore.remove(tabId).catch(() => {});
 });
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  // History/hash changes keep the same content script and active page run.
-  if (changeInfo.status !== 'loading') return;
+chrome.webNavigation.onCommitted.addListener(({ tabId, frameId }) => {
+  // Tab "loading" updates also fire for hash/history changes while scrolling.
+  // Only a committed navigation in the main frame replaces this page's run.
+  if (frameId !== 0) return;
   invalidateTab(tabId);
   void pageRunStore.remove(tabId).catch(() => {});
 });

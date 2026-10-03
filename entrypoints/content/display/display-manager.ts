@@ -10,6 +10,7 @@ import {
   DATA_TRANSLATED_ATTR,
 } from '../../../shared/constants';
 import { decodeInlineText, stripInlineText } from '../../../core/translation/inline-markup';
+import { getTranslationPalette, watchPageTheme } from './translation-appearance';
 
 export interface TranslationEntry {
   blockElement: Element;
@@ -24,7 +25,7 @@ export interface TranslationEntry {
   invalidated: boolean;
 }
 
-type BilingualPlacement = 'inline-right' | 'table' | 'compact' | 'block';
+type BilingualPlacement = 'table' | 'compact' | 'stacked' | 'block';
 
 /**
  * Display Manager handles all translation injection and mode switching.
@@ -33,6 +34,7 @@ export class DisplayManager {
   private mode: DisplayMode;
   private entries: TranslationEntry[] = [];
   private loadingElements = new Map<string, Element>();
+  private stopThemeWatcher: (() => void) | null = null;
 
   constructor(mode: DisplayMode = 'bilingual') {
     this.mode = mode;
@@ -152,6 +154,7 @@ export class DisplayManager {
   toggleMode(newMode: DisplayMode): void {
     if (newMode === this.mode) return;
     this.mode = newMode;
+    if (newMode === 'replace') this.disconnectThemeWatcher();
 
     for (const entry of this.entries) {
       this.removeRenderedTranslation(entry);
@@ -168,6 +171,7 @@ export class DisplayManager {
 
   clearAll(): void {
     this.clearLoadingIndicators();
+    this.disconnectThemeWatcher();
 
     for (const entry of this.entries) {
       this.removeRenderedTranslation(entry);
@@ -192,7 +196,7 @@ export class DisplayManager {
   private renderBilingual(entry: TranslationEntry): void {
     const placement = getBilingualPlacement(entry);
     const translationElement = document.createElement(
-      placement === 'inline-right' || placement === 'compact' ? 'span' : 'div',
+      placement === 'compact' || placement === 'stacked' ? 'span' : 'div',
     );
     translationElement.className =
       `${getTranslationClassName(placement)} ${CSS_PREFIX}segment-translation`;
@@ -201,6 +205,9 @@ export class DisplayManager {
     translationElement.setAttribute(DATA_SEGMENT_ATTR, entry.segmentId);
     translationElement.setAttribute('data-tr-injected', 'true');
     translationElement.setAttribute('data-tr-placement', placement);
+    if (/^H[1-6]$/.test(entry.blockElement.tagName.toUpperCase())) {
+      translationElement.setAttribute('data-tr-heading', 'true');
+    }
 
     const mountElement = placement === 'compact'
       ? findCompactMountElement(entry.blockElement, entry.textNodes)
@@ -212,8 +219,8 @@ export class DisplayManager {
 
     if (placement === 'compact') {
       mountElement.appendChild(translationElement);
-    } else if (placement === 'inline-right' || placement === 'table') {
-      entry.blockElement.appendChild(translationElement);
+    } else if (placement === 'stacked' || placement === 'table') {
+      insertAfterSource(entry, translationElement);
     } else if (entry.blockElement.parentElement) {
       const previousTranslation = [...this.entries]
         .reverse()
@@ -230,6 +237,22 @@ export class DisplayManager {
     }
 
     entry.translationElement = translationElement;
+    if (!this.stopThemeWatcher) {
+      this.stopThemeWatcher = watchPageTheme(() => {
+        for (const item of this.entries) {
+          if (!item.translationElement) continue;
+          const source = item.translationElement.getAttribute('data-tr-placement') === 'compact'
+            ? findCompactMountElement(item.blockElement, item.textNodes)
+            : item.blockElement;
+          item.translationElement.setAttribute('style', getTranslationStyle(source));
+        }
+      });
+    }
+  }
+
+  private disconnectThemeWatcher(): void {
+    this.stopThemeWatcher?.();
+    this.stopThemeWatcher = null;
   }
 
   private renderReplace(entry: TranslationEntry): void {
@@ -294,27 +317,21 @@ function findBlockElement(node: Node): Element {
   return document.body;
 }
 
-function shouldRenderInside(element: Element): boolean {
-  return ['LI', 'TD', 'TH', 'A', 'BUTTON', 'SPAN', 'LABEL'].includes(
-    element.tagName.toUpperCase(),
-  );
-}
-
 function isTableCell(element: Element): boolean {
   return ['TD', 'TH'].includes(element.tagName.toUpperCase());
 }
 
 function getBilingualPlacement(entry: TranslationEntry): BilingualPlacement {
   if (isTableCell(entry.blockElement)) return 'table';
-  if (shouldPlaceTranslationInlineRight(entry)) return 'inline-right';
+  if (['LI', 'DT', 'DD'].includes(entry.blockElement.tagName.toUpperCase())) return 'stacked';
   if (shouldUseCompactPlacement(entry)) return 'compact';
   return 'block';
 }
 
 function getTranslationClassName(placement: BilingualPlacement): string {
   switch (placement) {
-    case 'inline-right':
-      return `${CSS_PREFIX}inline-right-translation`;
+    case 'stacked':
+      return `${CSS_PREFIX}stacked-translation`;
     case 'table':
       return `${CSS_PREFIX}table-translation`;
     case 'compact':
@@ -325,46 +342,15 @@ function getTranslationClassName(placement: BilingualPlacement): string {
   }
 }
 
-function shouldPlaceTranslationInlineRight(entry: TranslationEntry): boolean {
-  if (window.innerWidth < 768) return false;
-
-  const element = entry.blockElement;
-  const tag = element.tagName.toUpperCase();
-  if (!shouldRenderInside(element)) return false;
-  if (['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'DIV', 'ARTICLE', 'SECTION'].includes(tag)) {
-    return false;
+function insertAfterSource(entry: TranslationEntry, translation: Element): void {
+  // Keep a list item's translation before its nested list or code block.
+  // Mount at the item boundary so a final link/bold fragment cannot own it.
+  let anchor: Node | undefined = entry.textNodes[entry.textNodes.length - 1];
+  while (anchor?.parentElement && anchor.parentElement !== entry.blockElement) {
+    anchor = anchor.parentElement;
   }
-
-  const originalLength = entry.originalText.trim().length;
-  const translationLength = entry.translation.trim().length;
-  if (originalLength > 40 || translationLength > 60) return false;
-
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) return false;
-
-  const computedStyle = getComputedStyle(element);
-  const fontSize = parseFloat(computedStyle.fontSize) || 14;
-  const lineHeight = parseLineHeight(computedStyle.lineHeight, fontSize);
-  const isSingleLine = rect.height <= lineHeight * 1.6;
-  if (!isSingleLine) return false;
-
-  const estimatedTranslationWidth = Math.min(
-    Math.max(translationLength * fontSize * 0.62, 48),
-    260,
-  );
-
-  if (isTableCell(element)) {
-    const estimatedOriginalWidth = originalLength * fontSize * 0.58;
-    const availableCellWidth = rect.width - estimatedOriginalWidth - 12;
-    return (
-      originalLength <= 16 &&
-      translationLength <= 24 &&
-      availableCellWidth >= estimatedTranslationWidth
-    );
-  }
-
-  const rightSpace = window.innerWidth - rect.right;
-  return rightSpace >= estimatedTranslationWidth + 16;
+  const sibling = anchor?.parentElement === entry.blockElement ? anchor.nextSibling : null;
+  entry.blockElement.insertBefore(translation, sibling ?? null);
 }
 
 function shouldUseCompactPlacement(entry: Pick<
@@ -375,9 +361,9 @@ function shouldUseCompactPlacement(entry: Pick<
   const tag = element.tagName.toUpperCase();
 
   if (isTableCell(element)) return false;
-  if (['P', 'ARTICLE', 'SECTION', 'BLOCKQUOTE'].includes(tag)) return false;
+  if (['P', 'ARTICLE', 'SECTION', 'BLOCKQUOTE', 'LI', 'DT', 'DD'].includes(tag) || /^H[1-6]$/.test(tag)) return false;
 
-  if (['A', 'BUTTON', 'SPAN', 'LABEL', 'LI', 'DT', 'DD', 'SUMMARY'].includes(tag)) {
+  if (['A', 'BUTTON', 'SPAN', 'LABEL', 'SUMMARY'].includes(tag)) {
     return true;
   }
 
@@ -450,12 +436,12 @@ function hasLayoutSensitiveContext(element: Element): boolean {
 
 function getTranslationStyle(sourceElement: Element): string {
   const style = getComputedStyle(sourceElement);
+  const palette = getTranslationPalette(sourceElement);
   return [
-    `color: ${style.color || 'inherit'}`,
-    `font-size: ${style.fontSize}`,
-    `font-weight: ${style.fontWeight}`,
-    `font-style: ${style.fontStyle}`,
-    `line-height: ${style.lineHeight}`,
+    `--tr-text: ${palette.text}`,
+    `--tr-surface: ${palette.background}`,
+    `--tr-border: ${palette.border}`,
+    `--tr-source-size: ${style.fontSize || '14px'}`,
   ].join('; ');
 }
 

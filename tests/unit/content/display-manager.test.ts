@@ -386,7 +386,7 @@ describe('DisplayManager', () => {
     expect(row.hasAttribute('data-tr-translated')).toBe(false);
   });
 
-  it('inherits the computed source color in every bilingual placement', () => {
+  it('gives every bilingual placement a distinct translation palette', () => {
     const tableRow = new FakeElement('tr');
     const tableCell = new FakeElement('td', { width: 240, height: 24 });
     tableRow.appendChild(tableCell);
@@ -430,8 +430,39 @@ describe('DisplayManager', () => {
       )) ?? item.element.parentElement?.children.find((child) => (
         child.getAttribute('data-tr-injected') === 'true'
       ));
-      expect(translation?.getAttribute('style')).toContain('color: rgb(20, 20, 20)');
+      expect(translation?.getAttribute('style')).toContain('--tr-text: rgb(91, 63, 145)');
+      expect(item.element.hasAttribute('style')).toBe(false);
     }
+  });
+
+  it('places a list translation before nested content without putting it inside the final link', () => {
+    const item = new FakeElement('li');
+    const link = new FakeElement('a');
+    const nestedList = new FakeElement('ul');
+    link.setAttribute('href', '/docs');
+    item.appendChild(link);
+    item.appendChild(nestedList);
+    const source = { textContent: 'Read the documentation', parentElement: link } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+
+    manager.injectSegment(item as unknown as Element, [source], '阅读文档', 'nested-list');
+
+    expect(item.children[1].className).toContain('tr-stacked-translation');
+    expect(item.children[2]).toBe(nestedList);
+    expect(link.children).toHaveLength(0);
+    expect(link.getAttribute('href')).toBe('/docs');
+    expect(source.textContent).toBe('Read the documentation');
+    manager.clearAll();
+    expect(item.children).toEqual([link, nestedList]);
+  });
+
+  it('keeps a short action translation inside its clickable element', () => {
+    const button = new FakeElement('button');
+    const source = { textContent: 'Submit', parentElement: button } as unknown as Text;
+    const manager = new DisplayManager('bilingual');
+    manager.injectSegment(button as unknown as Element, [source], '投稿', 'action');
+    expect(button.children[0].className).toContain('tr-compact-translation');
+    expect(source.textContent).toBe('Submit');
   });
 
   it('keeps the original element color during replace mode switches and clearing', () => {

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "网页翻译",
   "description": "AI-powered immersive webpage translation extension",
-  "version": "1.0.2",
-  "permissions": ["storage", "activeTab", "scripting", "clipboardWrite", "contextMenus"],
+  "version": "1.0.3",
+  "permissions": ["storage", "activeTab", "scripting", "clipboardWrite", "contextMenus", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     {
